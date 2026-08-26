@@ -1,0 +1,18 @@
+AI Engineer — Agentic Systems
+
+Join our team building autonomous LLM agents that take real actions for users.
+You will design multi-agent workflows, build tool-calling infrastructure, and
+own the evaluation harness that keeps agent quality from regressing.
+
+Responsibilities:
+- Design and ship agentic workflows using LLMs, tool calling, and RAG
+- Build embedding and vector search pipelines for retrieval
+- Own our eval framework: golden datasets, regression benchmarks, LLM judges
+- Build Python backend services and REST APIs to serve agent traffic
+- Work with the frontend team on a React trace viewer for debugging agent runs
+
+Requirements:
+- Strong Python; experience with OpenAI or Anthropic APIs
+- Understanding of prompting, embeddings, and retrieval
+- Backend fundamentals: APIs, databases, caching
+- Experience with evaluation and testing of nondeterministic systems

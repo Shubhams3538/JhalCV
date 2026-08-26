@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────
+# Personal data — NEVER commit
+# ─────────────────────────────────────────────────────────────────────
+# Your real profile: full name, phone, email, employment history.
+# Commit profile.example.json instead; it has the same schema, fake data.
+profile.json
+
+# Generated resumes. Each PDF carries your phone and email, each
+# .report.json embeds the job description verbatim, and each .data.json
+# holds the full rendered content.
+build/
+
+# Real job descriptions you paste in. These reveal which companies you are
+# applying to — the single most sensitive thing in this repo — and postings
+# are usually copyrighted. Sample JDs are tracked via the negations below.
+jds/*.txt
+!jds/backend_systems.txt
+!jds/ai_engineer.txt
+
+# ─────────────────────────────────────────────────────────────────────
+# Secrets (needed once the LLM tailorer lands)
+# ─────────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# ─────────────────────────────────────────────────────────────────────
+# Fonts — licensed binaries, do not redistribute
+# ─────────────────────────────────────────────────────────────────────
+fonts/*
+!fonts/.gitkeep
+
+# ─────────────────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─────────────────────────────────────────────────────────────────────
+# Editors / OS
+# ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Typst
+*.pdf
+!docs/*.pdf

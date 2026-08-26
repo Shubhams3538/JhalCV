@@ -1,0 +1,83 @@
+{
+  "_comment": "Copy to profile.json and fill in with your own data. profile.json is gitignored.",
+
+  "_locked": {
+    "note": "Frozen sections render verbatim: no scoring, no selection, no reordering, whatever the JD says. Only `projects` and `skills` vary per JD.",
+    "frozen_sections": ["basics", "experience", "coding_profiles", "education"]
+  },
+
+  "basics": {
+    "name": "Ada Lovelace",
+    "phone": "+00 00000 00000",
+    "email": "you@example.com",
+    "links": [
+      { "label": "LinkedIn", "url": "https://www.linkedin.com/in/your-handle/" },
+      { "label": "GitHub",   "url": "https://github.com/your-handle" }
+    ]
+  },
+
+  "experience": [
+    {
+      "id": "example-co",
+      "org": "Example Co",
+      "role": "Software Developer",
+      "location": "Remote",
+      "start": "Jan 2025",
+      "end": "Present",
+      "max_bullets": 5,
+      "stack": ["TypeScript", "Node.js", "PostgreSQL"],
+      "bullets": [
+        { "id": "ex1", "angles": ["backend"], "text": "What you did, in one line that starts with a verb and ends with a measurable outcome." },
+        { "id": "ex2", "angles": ["agentic", "data"], "text": "How you did it: the technical means, named specifically." },
+        { "id": "ex3", "angles": ["backend", "infra"], "text": "What changed because of it, with a number: 3-5s down to ~700ms." }
+      ]
+    }
+  ],
+
+  "projects": [
+    {
+      "id": "example-project",
+      "name": "Example Project",
+      "stack": ["Python", "FastAPI"],
+      "link": { "label": "GitHub", "url": "https://github.com/your-handle/example" },
+      "angles": ["backend", "systems", "agentic"],
+      "taglines": {
+        "backend": "How you'd introduce this project to a backend team",
+        "systems": "How you'd introduce the same project to a systems team",
+        "agentic": "And to an AI team - same project, honest reframing"
+      },
+      "bullets": [
+        { "id": "p1", "angles": ["backend"], "text": "A bullet written for the backend angle." },
+        { "id": "p2", "angles": ["systems"], "text": "A bullet written for the systems angle." },
+        { "id": "p3", "angles": ["agentic"], "text": "A bullet written for the agentic angle." },
+        { "id": "p4", "angles": ["backend", "systems"], "text": "One that serves both.",
+          "needs_verification": "Use this field to flag any number you have not confirmed. It never renders." }
+      ]
+    }
+  ],
+
+  "coding_profiles": [
+    { "text": "LeetCode: Guardian (0000)", "link": { "label": "Link", "url": "https://leetcode.com/your-handle/" }, "bold_until": ":" },
+    { "text": "Solved 0000+ problems" }
+  ],
+
+  "skills": {
+    "_comment": "Must be a SUPERSET of every technology proven in the bullets above. The tailorer reorders within each group; it never adds.",
+    "Languages": ["Python", "TypeScript", "Go"],
+    "AI": ["RAG", "Embeddings", "Vector Search", "MCP", "Tool Calling"],
+    "Backend": ["REST APIs", "Node.js", "FastAPI"],
+    "Databases": ["PostgreSQL", "pgvector"],
+    "Infrastructure": ["Docker", "Kubernetes", "AWS", "Git"],
+    "Fundamentals": ["Data Structures", "Operating Systems", "DBMS", "Computer Networks"]
+  },
+
+  "education": [
+    {
+      "org": "Your University",
+      "degree": "Bachelor of Technology in Computer Science and Engineering",
+      "start": "June 2020",
+      "end": "July 2024",
+      "detail": "CGPA: 0.00/10"
+    }
+  ]
+}

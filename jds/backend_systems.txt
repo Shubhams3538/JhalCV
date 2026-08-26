@@ -1,0 +1,19 @@
+Senior Backend Engineer — Platform Infrastructure
+
+We are looking for a backend engineer to work on our high-throughput execution
+platform. You will design and build REST APIs in Node.js, own service latency
+and throughput, and work close to the metal on our sandboxed code execution
+runtime.
+
+Responsibilities:
+- Build and scale backend services handling millions of requests per day
+- Optimize concurrency, thread pooling, and memory usage in our execution engine
+- Own the Docker and AWS deployment pipeline, including CDN and caching layers
+- Work with PostgreSQL and Redis for persistence and caching
+- Improve observability, monitoring, and performance profiling
+
+Requirements:
+- Strong systems fundamentals: operating systems, concurrency, networking
+- Experience with C++, Go, or Rust for performance-critical paths
+- Production experience with Docker, Kubernetes, AWS
+- Solid data structures and algorithms
