@@ -99,7 +99,59 @@ it drops the globally lowest-scoring one first, never below two per entry. Losin
 leading always beats losing an achievement. Typst compiles in ~40ms, so a full
 fit loop is imperceptible.
 
-## Next (v2, needs the API key)
+## Tailoring: rules or LLM
+
+```bash
+python3 -m resume make --jd jds/x.txt                    # auto: LLM if a key is present
+python3 -m resume make --jd jds/x.txt --tailorer rules   # never call the API
+python3 -m resume make --jd jds/x.txt --tailorer llm     # fail loudly if unavailable
+python3 -m resume compare --jd jds/x.txt                 # diff the two JD parsers
+```
+
+`auto` falls back to rules on any failure — no key, timeout, malformed response,
+failed validation — and records the reason in the sidecar report. It never
+raises and always produces a PDF. `--tailorer llm` is the strict form: it exits
+non-zero rather than silently degrading, which is what you want in CI.
+
+### The split, decided by measurement
+
+The LLM did not beat plain string matching at recall. `gpt-4o-mini` missed
+`Kubernetes` and `Node.js` on a JD naming both outright, and scored a role
+demanding "close to the metal" work as 0% systems. So the rule-based pass stays
+and the model only adds to it:
+
+| | source |
+|---|---|
+| `angle_scores` | LLM alone — the judgment call |
+| `matched_skills` | rules ∪ LLM — rules guarantee literals, LLM adds implied |
+| `gap_skills` | rules ∪ LLM — rules guarantee recall, LLM adds semantic |
+
+Model is `gpt-5.5` (`llm_tailor.JD_MODEL`), overridable with `--model`.
+
+### Why the LLM cannot break the lock
+
+`tailor_llm` runs the rule-based tailorer first to build the complete resume,
+then overwrites **only** `projects` and `skills`. Frozen sections come from
+identical code in both modes, so the LLM has no path to them. Provable:
+
+```bash
+python3 -m resume lock --tailorer llm
+```
+
+### What the LLM is allowed to return
+
+Identifiers, never prose. It answers "use `ws1, ws2, ws4`" and the renderer looks
+up your wording from `profile.json`, so no generated text reaches the PDF. The
+schema enforces the rest: `matched_skills` is an enum of your real skills, so the
+API rejects an invented one server-side.
+
+`validate_selection` then repairs what a schema cannot express — bullets claimed
+by the wrong project, angles a project does not offer, duplicates, and skill
+groups that came back incomplete. Skills must return as a *permutation*: foreign
+entries are dropped, omitted ones appended. Nothing invented, nothing lost. Every
+repair is printed and recorded rather than applied silently.
+
+## Next
 
 Replace `tailor.parse_jd` and the scoring in `tailor.tailor` with LLM calls that
 return the same shapes. Add optional Tier-2 vocabulary rewriting behind a

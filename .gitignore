@@ -57,3 +57,6 @@ venv/
 # Typst
 *.pdf
 !docs/*.pdf
+
+# LLM response cache
+.cache/

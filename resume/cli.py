@@ -28,23 +28,49 @@ def cmd_make(args) -> int:
     jd_path = Path(args.jd)
     jd_text = jd_path.read_text()
 
+    kw = dict(max_projects=args.projects, bullets_per_job=args.job_bullets,
+              bullets_per_project=args.project_bullets)
+
     print(f"{BOLD}▸ tailoring{RESET} {jd_path.name}")
-    data, report = tailor(
-        profile, jd_text,
-        max_projects=args.projects,
-        bullets_per_job=args.job_bullets,
-        bullets_per_project=args.project_bullets,
-    )
+    if args.tailorer == "rules":
+        data, report = tailor(profile, jd_text, **kw)
+        report.setdefault("tailorer", "rules")
+    else:
+        # `auto` and `llm` share a path: tailor_llm always falls back to the
+        # rule-based result internally and never raises. The difference is only
+        # whether a silent fallback is acceptable.
+        from .llm_tailor import tailor_llm
+        data, report = tailor_llm(profile, jd_text, model=args.model, **kw)
+        if args.tailorer == "llm" and report["tailorer"] != "llm":
+            print(f"  {RED}✗ llm unavailable: {report['llm'].get('reason')}{RESET}")
+            return 1
+
+    info = report.get("llm", {})
+    if report["tailorer"] == "llm":
+        cached = info.get("cached", {})
+        marks = "".join(("j" if cached.get("jd") else "J", "s" if cached.get("selection") else "S"))
+        print(f"  {GREEN}llm{RESET} {DIM}{info.get('model')} "
+              f"({'cached' if marks.islower() else 'called'}){RESET}")
+        if info.get("summary"):
+            print(f"  {DIM}reads as:{RESET} {info['summary']}")
+    elif info.get("reason"):
+        print(f"  {YELLOW}fell back to rules:{RESET} {DIM}{info['reason']}{RESET}")
 
     top = list(report["angle_scores"].items())[:4]
-    print(f"  {DIM}angles:{RESET} " + ", ".join(f"{a} {s:.0%}" for a, s in top))
+    print(f"  {DIM}angles:{RESET} " + ", ".join(f"{a} {s:.0%}" for a, s in top if s))
     for d in report["decisions"]:
-        if d["section"] == "projects" and "name" in d:
+        if d.get("section") != "projects":
+            continue
+        if d.get("by") == "llm":
+            print(f"  {DIM}project:{RESET} {d['name']} {DIM}({d['angle']}) — {d.get('why','')}{RESET}")
+        elif "name" in d:
             print(f"  {DIM}project:{RESET} {d['name']} "
                   f"{DIM}(score {d['score']:.2f}, angle: {d['angle']}){RESET}")
-        elif d["section"] == "projects" and "not_selected" in d:
-            for p in d["not_selected"]:
-                print(f"  {DIM}  skipped: {p['name']} (score {p['score']:.2f}){RESET}")
+        elif "not_selected" in d:
+            for pr in d["not_selected"]:
+                print(f"  {DIM}  skipped: {pr['name']} (score {pr['score']:.2f}){RESET}")
+    for fix in info.get("repairs", []):
+        print(f"  {YELLOW}repaired:{RESET} {DIM}{fix}{RESET}")
 
     name = args.out or f"{date.today():%Y-%m-%d}_{_slug(jd_path.stem)}"
     out_pdf = ROOT / "build" / f"{name}.pdf"
@@ -89,7 +115,7 @@ def cmd_make(args) -> int:
         "generated": date.today().isoformat(),
         "jd_file": str(jd_path),
         "jd_text": jd_text,
-        "tailorer": "rule-based v1",
+        "tailorer": report.get("tailorer", "rules"),
         "report": report,
         "fit": result,
         "verify_failures": fails,
@@ -133,7 +159,11 @@ def cmd_lock(args) -> int:
 
     results = {}
     for jd in jds:
-        data, _ = tailor(profile, jd.read_text())
+        if args.tailorer == "llm":
+            from .llm_tailor import tailor_llm
+            data, _ = tailor_llm(profile, jd.read_text())
+        else:
+            data, _ = tailor(profile, jd.read_text())
         for k in data:
             if k in ("section_order", "config"):
                 continue
@@ -155,6 +185,53 @@ def cmd_lock(args) -> int:
     return 1 if failed else 0
 
 
+
+def cmd_compare(args) -> int:
+    """Run both JD parsers on the same job description, side by side."""
+    from .tailor import parse_jd as parse_rules
+    from .llm_tailor import parse_jd_llm, ANGLES
+    from . import llm as llmmod
+
+    profile = json.loads(Path(args.profile).read_text())
+    jd_text = Path(args.jd).read_text()
+
+    rules = parse_rules(jd_text, profile)
+    if not llmmod.have_key():
+        print(f"{RED}no OPENAI_API_KEY — nothing to compare against{RESET}")
+        return 1
+    try:
+        from .llm_tailor import JD_MODEL
+        chosen = args.model or JD_MODEL
+        model, hit = parse_jd_llm(jd_text, profile, model=chosen)
+    except llmmod.LLMError as e:
+        print(f"{RED}✗ llm failed: {e}{RESET}")
+        return 1
+
+    print(f"{BOLD}▸ {Path(args.jd).name}{RESET}  {DIM}{chosen}"
+          f"{' · cached' if hit else ''}{RESET}")
+    if model.get("summary"):
+        print(f"  {DIM}llm reads it as:{RESET} {model['summary']}")
+        print(f"  {DIM}seniority:{RESET} {model.get('seniority', '?')}")
+
+    print(f"\n  {'angle':<12}{'rules':>8}{'llm':>8}   {DIM}(shown where either is non-zero){RESET}")
+    for a in ANGLES:
+        r = rules["angle_scores"].get(a, 0.0)
+        m = model["angle_scores"].get(a, 0.0)
+        if r == 0 and m == 0:
+            continue
+        delta = abs(r - m)
+        mark = f"{YELLOW}  ←{RESET}" if delta >= 0.15 else ""
+        print(f"  {a:<12}{r:>7.0%}{m:>8.0%}{mark}")
+
+    for label, key in (("matched skills", "matched_skills"), ("gaps", "gap_skills")):
+        r, m = set(rules[key]), set(model[key])
+        print(f"\n  {BOLD}{label}{RESET}")
+        print(f"    {DIM}both       :{RESET} {', '.join(sorted(r & m)) or '-'}")
+        print(f"    {DIM}rules only :{RESET} {', '.join(sorted(r - m)) or '-'}")
+        print(f"    {GREEN}llm only   :{RESET} {', '.join(sorted(m - r)) or '-'}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="resume", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -168,6 +245,9 @@ def main(argv=None) -> int:
     m.add_argument("--projects", type=int, default=2)
     m.add_argument("--job-bullets", type=int, default=5)
     m.add_argument("--project-bullets", type=int, default=3)
+    m.add_argument("--tailorer", choices=["auto", "llm", "rules"], default="auto",
+                   help="auto: use the LLM when a key is present, else rules")
+    m.add_argument("--model", default=None, help="override the LLM model")
     m.add_argument("-v", "--verbose", action="store_true")
     m.set_defaults(func=cmd_make)
 
@@ -181,7 +261,14 @@ def main(argv=None) -> int:
     lk = sub.add_parser("lock", help="verify frozen sections never vary by JD")
     lk.add_argument("--profile", default=str(ROOT / "profile.json"))
     lk.add_argument("--jds", default=str(ROOT / "jds"))
+    lk.add_argument("--tailorer", choices=["rules", "llm"], default="rules")
     lk.set_defaults(func=cmd_lock)
+
+    cp = sub.add_parser("compare", help="diff the rule-based and LLM JD parsers")
+    cp.add_argument("--jd", required=True)
+    cp.add_argument("--profile", default=str(ROOT / "profile.json"))
+    cp.add_argument("--model", default=None, help="override the default JD model")
+    cp.set_defaults(func=cmd_compare)
 
     args = ap.parse_args(argv)
     return args.func(args)
