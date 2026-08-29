@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 
 from . import llm
-from .tailor import ANGLE_KEYWORDS, parse_jd as parse_jd_rules, tailor as tailor_rules
+from .tailor import (ANGLE_KEYWORDS, parse_jd as parse_jd_rules,
+                     tailor as tailor_rules, renderable, project_cap)
 
 # The closed angle enum. Kept in sync with the rule-based vocabulary by deriving
 # it from the same dict, so the two tailorers can never disagree about what
@@ -400,6 +401,8 @@ def tailor_llm(profile: dict, jd_text: str, *, max_projects: int = 2,
     Any failure leaves the rule-based result in place. This function does not
     raise; it records what happened in the report and always returns a resume.
     """
+    profile = renderable(profile)
+    max_projects = project_cap(profile, max_projects)
     data, report = tailor_rules(
         profile, jd_text, max_projects=max_projects,
         bullets_per_job=bullets_per_job, bullets_per_project=bullets_per_project)

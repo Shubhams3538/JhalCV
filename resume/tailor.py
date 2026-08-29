@@ -138,6 +138,35 @@ def parse_jd(jd_text: str, profile: dict) -> dict:
     }
 
 
+
+MIN_SHIPPED_BULLETS = 2
+
+
+def renderable(profile: dict) -> dict:
+    """Strip anything not yet true from the profile before any tailorer sees it.
+
+    Bullets carry status "shipped" (default) or "planned". Planned bullets are
+    written in advance - they are the spec for what you are building - but they
+    describe work that does not exist yet, so no tailorer is ever shown them. A
+    project with fewer than MIN_SHIPPED_BULLETS shipped bullets is not resume-ready
+    and is dropped entirely rather than rendered thin.
+    """
+    out = dict(profile)
+    projects = []
+    for p in profile.get("projects", []):
+        shipped = [b for b in p["bullets"] if b.get("status", "shipped") == "shipped"]
+        if len(shipped) >= MIN_SHIPPED_BULLETS:
+            projects.append({**p, "bullets": shipped})
+    out["projects"] = projects
+    return out
+
+
+def project_cap(profile: dict, requested: int) -> int:
+    """The page cap is a property of the profile, not a command-line flag."""
+    hard = profile.get("_locked", {}).get("max_projects_on_page")
+    return min(requested, hard) if hard else requested
+
+
 def _score_bullet(bullet: dict, jd: dict) -> float:
     angles = bullet.get("angles", [])
     score = sum(jd["angle_scores"].get(a, 0.0) for a in angles)
@@ -175,6 +204,8 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
     resume_data is exactly what templates/classic.typ consumes.
     report is the human-readable explanation of every decision made.
     """
+    profile = renderable(profile)
+    max_projects = project_cap(profile, max_projects)
     jd = parse_jd(jd_text, profile)
     report = {"angle_scores": jd["angle_scores"], "gap_skills": jd["gap_skills"], "decisions": []}
 

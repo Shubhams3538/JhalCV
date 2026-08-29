@@ -50,7 +50,8 @@ def structural_checks(pdf: Path, *, max_pages: int = 1) -> list[dict]:
              "postgresql", "mysql", "mongodb", "nodejs", "node.js", "dbms", "cgpa",
              "nextwave", "dsa", "oop", "cdn", "aws", "api", "apis",
              "openai", "typescript", "pgvector", "hnsw", "drizzle", "gpt",
-             "fastapi", "mcp", "graphql", "postgres", "nextjs"}
+             "fastapi", "mcp", "graphql", "postgres", "nextjs",
+             "websockets", "websocket", "aisarthi", "mongodb", "zod", "sdks"}
     for m in re.finditer(r"\b[a-zA-Z]*[a-z][A-Z][a-zA-Z]*\b", raw):
         w = m.group(0)
         if w.lower() in allow:
