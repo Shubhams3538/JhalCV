@@ -60,3 +60,6 @@ venv/
 
 # LLM response cache
 .cache/
+
+# Local app preferences and transient state
+.local/
