@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import time
 import json
 import secrets
 import shutil
@@ -12,7 +14,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .llm import have_key
-from .storage import Store
+from .storage import Store, text
+from .github import fetch_repository
+from .descriptions import import_project, rewrite_projects, budget
+from .tailor import tailor
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -39,7 +44,47 @@ class App:
                 return {'saved': True}
             if path == '/api/settings':
                 return self.store.save_settings(body)
+            if path == '/api/import':
+                jd = text(body.get('jd', ''), 'Job description', 30000)
+                return import_project(fetch_repository(body.get('url')), jd, self.store.settings())
+            if path == '/api/tailor':
+                return self.create_draft(body)
             raise ValueError('Unknown action.')
+
+
+    def create_draft(self, body):
+        jd = text(body.get('jd'), 'Job description', 30000, True)
+        if len(jd) < 40:
+            raise ValueError('Paste a job description of at least 40 characters.')
+        if not self.store.profile_path.exists():
+            raise ValueError('Save your own profile before creating a resume.')
+        profile = self.store.profile()
+        chosen = body.get('projects')
+        available = {p['id'] for p in profile['projects']}
+        if not isinstance(chosen, list) or not chosen or any(not isinstance(x, str) or x not in available for x in chosen):
+            raise ValueError('Choose at least one project from your library.')
+        profile['projects'] = [p for p in profile['projects'] if p['id'] in chosen]
+        settings = self.store.settings()
+        if settings['tailorer'] == 'rules':
+            data, report = tailor(profile, jd)
+            report['tailorer'] = 'rules'
+        else:
+            from .llm_tailor import tailor_llm
+            data, report = tailor_llm(profile, jd, model=settings['model'])
+        rewritten, notice = rewrite_projects(data, jd, settings)
+        if report.get('tailorer') == 'rules' and settings['tailorer'] == 'auto':
+            notice += ' Project selection used the rules fallback.'
+        now = time.monotonic()
+        self.drafts = {k: v for k, v in self.drafts.items() if now - v['created'] < 7200}
+        while len(self.drafts) >= 10:
+            self.drafts.pop(next(iter(self.drafts)))
+        ident = secrets.token_urlsafe(18)
+        self.drafts[ident] = {'created': now, 'source': copy.deepcopy(data), 'data': rewritten,
+                              'jd': jd, 'report': report, 'notice': notice}
+        return {'id': ident, 'notice': notice, 'gaps': report.get('gap_skills', []),
+                'projects': [{'name': p['name'], 'bullets': p['bullets'],
+                              'budgets': [budget(b) for b in original['bullets']]}
+                             for p, original in zip(rewritten['projects'], data['projects'])]}
 
 
 def handler(app):
