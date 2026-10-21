@@ -1,12 +1,110 @@
-# runtime_resume_maker
+# JhalCV
 
-Paste a job description, get a tailored one-page PDF.
+A local resume workspace: paste a job description, import your GitHub projects,
+review concise descriptions, and save a one-page PDF. Everyone runs their own
+copy. There is no central server, account, database, frontend build, or Python
+package installation.
 
-Your experience stays fixed. The projects and skills change per job — which
-projects appear, how each is framed, which bullets show, and what order skills
-sit in. An LLM makes those calls; it never writes a word that reaches the page.
+## Start the browser app
 
-## Setup
+Install **Python 3.9+**, [Typst](https://github.com/typst/typst#installation), and
+[Poppler](https://poppler.freedesktop.org/) (`pdfinfo` and `pdftotext`). On macOS:
+
+```bash
+brew install typst poppler
+```
+
+Then, from this repository:
+
+```bash
+cp .env.example .env       # optional: add your own OPENAI_API_KEY
+./start.sh
+# Windows, or any platform without sh:
+python3 app.py
+```
+
+The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
+Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
+URL yourself, use `python3 app.py --port 8765 --no-browser`.
+
+1. Open **My profile**, replace the sample contact details, experience,
+   education, achievements, and skills, then save. An existing `profile.json`
+   is loaded automatically. Tailoring never edits these fixed sections.
+2. In **Tailor resume**, add a public GitHub repository URL. The app fetches its
+   default-branch README and prepares an editable project draft. Read the source,
+   confirm what you actually built, remove planned/unverified claims, and save.
+   You can also add projects manually or edit your existing library.
+3. Paste the job description and choose which projects to consider. The current
+   profile's project cap remains in effect (two by default). AI selects relevant
+   projects and lightly refines their bullets; rules work without an API key.
+4. Review the tailored bullet wording, then **Build PDF preview**. Check the
+   PDF and any text-check warnings, then **Save to destination**.
+5. Change the output folder and filename in **Settings**. The default is
+   `build/shubham_Resume.pdf`. Existing files are never replaced: later exports
+   use `shubham_Resume_2.pdf`, and so on. The saved path is shown after export.
+
+### Clarity and the page budget
+
+Project purpose comes first. The model is instructed to emphasize natural JD
+overlap using only confirmed project evidence, never to force requirements into
+the resume or invent achievements. Imported README drafts need your review:
+READMEs can contain plans, examples, or claims about other contributors.
+
+For existing bullets, every AI rewrite and every reviewed edit must fit the
+**original character count AND word count**, keep the same bullet count, and
+introduce no new numbers. Invalid AI edits fall back to the original bullet.
+Headings, taglines, project stacks, and the template are unchanged by rewriting.
+
+The original selected content is first fitted using the existing one-page
+renderer. Reviewed wording is then compiled with exactly that baseline's font,
+spacing, and margins. If it overflows, original project wording is restored and
+the preview explains why. If the baseline itself cannot fit on one page, export
+is blocked so you can shorten the saved profile. Text-layer checks run before
+export; missing content blocks it, while heuristic glued-word/column warnings
+are shown for visual review. Shorter character counts alone cannot guarantee
+identical line wrapping, so the rendered PDF is the final check.
+
+### Local data and optional network services
+
+- `profile.json`: your source profile and confirmed project evidence.
+- `.local/settings.json`: your output folder, filename, mode, and model.
+- `.cache/web/`: PDF previews, rendered JSON, and decision reports including JDs.
+- `.cache/llm/`: cached model requests and responses.
+
+All of these are gitignored. Output folders you choose outside this repository
+are your responsibility; avoid publicly tracked or shared folders for private
+resumes. Preview files remain on disk until you delete `.cache/web/`; draft
+sessions expire after two hours or when the local server stops. Save an exported
+PDF before closing the server.
+
+Public GitHub imports work without a token. For private repositories or higher
+API limits, set `GITHUB_TOKEN` in `.env` with read access to the repository. Use
+canonical repository URLs (`https://github.com/owner/repo`), not file/branch
+links. Moved repositories need their current URL. API keys/tokens stay in the
+local Python process and never reach the frontend.
+
+In AI mode, your JD and relevant profile/project content are sent directly to
+OpenAI; README import contacts GitHub. **Rules only** in Settings makes no AI
+requests and uses README excerpts for import. Failed/invalid AI requests fall
+back to original wording and rule-based selection with a visible explanation.
+
+### Verification
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The suite covers storage validation, HTTP origin/token protection, GitHub URL
+and README handling, AI length/number fallback, fixed-section preservation,
+PDF overflow handling, real Typst/Poppler rendering, custom folders, stale
+previews, and filename collisions. PDF integration tests skip if tools are not
+installed.
+
+## Original terminal workflow
+
+`main.py` and `python3 -m resume` remain available:
+
+### Terminal setup
 
 ```bash
 brew install typst poppler          # the only dependencies; no Python packages
@@ -14,7 +112,7 @@ cp profile.example.json profile.json
 cp .env.example .env                # add OPENAI_API_KEY (optional)
 ```
 
-## Run it
+### Terminal usage
 
 ```bash
 python3 main.py
@@ -166,7 +264,7 @@ identical code in both modes, so the LLM has no path to them.
 
 ### What the LLM may return
 
-Identifiers, never prose. It answers "use `ws1, ws2, ws4`" and the renderer
+For the original CLI selection step: identifiers, never prose. The browser app adds a separate, bounded, reviewable project-bullet rewrite after selection. It answers "use `ws1, ws2, ws4`" and the renderer
 looks up your wording, so no generated text reaches the PDF. The schema enforces
 the rest — `matched_skills` is an enum of your real skills, so the API rejects
 an invented one server-side.

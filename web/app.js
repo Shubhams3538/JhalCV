@@ -30,7 +30,7 @@ async function task(button, action) {
   button = button.closest('button');
   if (busy) return;
   busy = true;
-  const controls = [...document.querySelectorAll('button')];
+  const controls = [...document.querySelectorAll('button, input, textarea, select')];
   const previous = controls.map(b => b.disabled);
   controls.forEach(b => b.disabled = true);
   const old = button.textContent;
@@ -55,10 +55,32 @@ function field(label, value, change, {area = false, wide = false, placeholder = 
   return el('div', {class: wide ? 'wide' : ''}, [el('label', {htmlFor: id, text: label}), input]);
 }
 const commaList = s => s.split(',').map(x => x.trim()).filter(Boolean);
-const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
-function editBullets(entry, value) {
-  const existing = entry.bullets;
-  entry.bullets = lines(value).map((text, i) => ({...(existing[i] || {id: crypto.randomUUID(), angles: entry.angles || ['backend']}), text}));
+function bulletEditor(entry, allowPlanned = true) {
+  const wrap = el('div', {class: 'wide bullet-editor'});
+  function render() {
+    wrap.replaceChildren(el('p', {class: 'hint', text: allowPlanned ? 'Each bullet keeps its own status. Planned project work never appears on the resume. At least two shipped bullets are required per project.' : 'Experience renders exactly as saved. Add only confirmed work.'}));
+    entry.bullets.forEach((bullet, index) => {
+      const row = el('div', {class: 'bullet-row'});
+      row.append(field('Bullet ' + (index + 1), bullet.text, value => bullet.text = value, {area: true}));
+      const id = 'status-' + crypto.randomUUID();
+      const status = el('select', {id, onchange: e => {bullet.status = e.target.value; invalidate();}}, [
+        el('option', {value: 'shipped', text: 'Shipped / confirmed'}),
+        el('option', {value: 'planned', text: 'Planned — excluded from resume'})
+      ]);
+      status.value = bullet.status || 'shipped';
+      if (allowPlanned) row.append(el('label', {htmlFor: id, text: 'Status'}), status);
+      row.append(el('button', {type: 'button', class: 'text-button', text: 'Remove bullet', onclick: () => {
+          entry.bullets.splice(index, 1); invalidate(); render();
+        }}));
+      wrap.append(row);
+    });
+    wrap.append(el('button', {type: 'button', class: 'text-button', text: '+ Add bullet', onclick: () => {
+      entry.bullets.push({id: crypto.randomUUID(), text: '', angles: entry.angles || ['backend'], status: allowPlanned ? 'planned' : 'shipped'});
+      invalidate(); render();
+    }}));
+  }
+  render();
+  return wrap;
 }
 function projectEditor(p) {
   return el('div', {class: 'form-grid'}, [
@@ -67,7 +89,7 @@ function projectEditor(p) {
     field('GitHub / project URL', p.link?.url || '', v => {if (v.trim()) p.link = {label: 'GitHub', url: v}; else delete p.link;}),
     field('Focus areas (comma separated)', (p.angles || []).join(', '), v => p.angles = commaList(v)),
     field('Short introduction', Object.values(p.taglines || {})[0] || '', v => {p.taglines = Object.fromEntries((p.angles?.length ? p.angles : ['backend']).map(a => [a, v]));}, {wide: true}),
-    field('Project bullets (one per line; at least two)', (p.bullets || []).map(b => b.text).join('\n'), v => editBullets(p, v), {area: true, wide: true})
+    bulletEditor(p)
   ]);
 }
 function renderProjects() {
@@ -99,7 +121,7 @@ function linkFields(owner, key = 'links') {
   }
   if (key === 'links' || !links.length) wrap.append(el('button', {type: 'button', class: 'text-button', text: '+ Add link', onclick: () => {
     if (key === 'links') owner.links.push({label: '', url: ''}); else owner.link = {label: '', url: ''};
-    renderProfile();
+    invalidate(); renderProfile();
   }}));
   return wrap;
 }
@@ -119,12 +141,12 @@ function renderProfile() {
     profile[section].forEach((entry, index) => {
       const grid = el('div', {class: 'form-grid entry'});
       for (const key of def.fields) grid.append(field(({org: 'Organization', start: 'Start date', end: 'End date', text: 'Description'})[key] || key[0].toUpperCase() + key.slice(1), entry[key], v => entry[key] = v));
-      if (section === 'experience') grid.append(field('Bullets (one per line)', entry.bullets.map(b => b.text).join('\n'), v => editBullets(entry, v), {area: true, wide: true}));
+      if (section === 'experience') grid.append(bulletEditor(entry, false));
       if (section === 'coding_profiles') grid.append(linkFields(entry, 'link'));
       grid.append(el('button', {type: 'button', class: 'text-button', text: 'Remove entry', onclick: () => {profile[section].splice(index, 1); invalidate(); renderProfile();}}));
       panel.append(grid);
     });
-    panel.append(el('button', {type: 'button', class: 'text-button', text: '+ Add entry', onclick: () => {profile[section].push(def.fresh()); renderProfile();}}));
+    panel.append(el('button', {type: 'button', class: 'text-button', text: '+ Add entry', onclick: () => {profile[section].push(def.fresh()); invalidate(); renderProfile();}}));
     container.append(panel);
   }
   const skills = el('article', {class: 'panel'}, [el('h2', {text: 'Skills'})]);
@@ -137,7 +159,7 @@ function renderProfile() {
   const groupName = el('input', {placeholder: 'New skill group, e.g. Languages', 'aria-label': 'New skill group'});
   skills.append(el('div', {class: 'import-row'}, [groupName, el('button', {type: 'button', class: 'secondary', text: 'Add group', onclick: () => {
     const name = groupName.value.trim(); if (!name || name.startsWith('_') || Object.hasOwn(profile.skills, name)) return notify('Enter a unique skill group name.', true);
-    Object.defineProperty(profile.skills, name, {value: [], enumerable: true, configurable: true, writable: true}); renderProfile();
+    Object.defineProperty(profile.skills, name, {value: [], enumerable: true, configurable: true, writable: true}); invalidate(); renderProfile();
   }})]));
   container.append(skills);
 }
@@ -186,6 +208,7 @@ async function importProject() {
   wrap.replaceChildren(el('h3', {text: 'Review imported project'}), el('p', {class: 'hint', text: imported.notice}), projectEditor(imported.project));
   const source = el('details', {}, [el('summary', {text: 'Read source README'}), el('pre', {class: 'source-readme', text: imported.project._readme})]);
   wrap.append(source, el('button', {class: 'primary', text: 'Confirm facts & add to library', onclick: e => task(e.target, async () => {
+    if (!imported.project.link?.url) throw new Error('Keep the GitHub source URL when confirming an import.');
     if (profile.projects.some(p => p.link?.url === imported.project.link.url)) throw new Error('This repository is already in your library. Edit its existing entry instead.');
     const next = structuredClone(profile); next.projects.push(imported.project);
     await api('profile', next); profile = next; selected.add(imported.project.id); imported = null;

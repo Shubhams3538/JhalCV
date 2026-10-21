@@ -29,6 +29,7 @@ def clean_readme(value):
     value = re.sub(r'<[^>]*>', '', value)
     value = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', value)
     value = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', value)
+    value = re.sub(r'\*\*|__|~~|`', '', value)
     return value
 
 
@@ -47,11 +48,14 @@ def import_project(evidence, jd, settings):
     for line in plain.splitlines():
         line = line.strip().lstrip('#*- >').strip()
         if len(line) >= 35 and not line.startswith(('http', '|', '$', 'npm ', 'git ', 'pip ', 'python ', 'cargo ')):
-            sentence = short_sentence(re.split(r'(?<=[.!?])\s+', line)[0])
-            if sentence and sentence not in candidates:
-                candidates.append(sentence)
+            for fragment in re.split(r'(?<=[.!?])\s+', line):
+                if len(fragment.strip()) < 25:
+                    continue
+                sentence = short_sentence(fragment)
+                if sentence and sentence not in candidates:
+                    candidates.append(sentence)
     description = evidence['description']
-    fallback = ([short_sentence(description)] if description else []) + candidates
+    fallback = candidates + ([short_sentence(description)] if description else [])
     fallback = list(dict.fromkeys(x for x in fallback if x))[:3]
     if len(fallback) < 2:
         raise ValueError('This README has too little descriptive evidence. Add the project manually with at least two confirmed bullets.')
@@ -85,9 +89,9 @@ def import_project(evidence, jd, settings):
             tagline = raw['tagline']
         except (llm.LLMError, ValueError, KeyError, TypeError):
             notice = 'AI import was unavailable or invalid; showing README excerpts instead. Review facts and remove planned work before saving.'
-            tagline = short_sentence(description or fallback[0], 70, 12)
+            tagline = short_sentence(fallback[0], 70, 12)
     else:
-        tagline = short_sentence(description or fallback[0], 70, 12)
+        tagline = short_sentence(fallback[0], 70, 12)
     if evidence.get('truncated'):
         notice += ' Only the first 30,000 README characters were imported.'
     ident = 'github-' + uuid.uuid4().hex[:12]

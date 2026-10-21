@@ -18,6 +18,8 @@ from .storage import Store, text
 from .github import fetch_repository
 from .descriptions import import_project, rewrite_projects, budget
 from .tailor import tailor
+from .workspace import build_preview, export_preview
+from .render import RenderError
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -49,8 +51,25 @@ class App:
                 return import_project(fetch_repository(body.get('url')), jd, self.store.settings())
             if path == '/api/tailor':
                 return self.create_draft(body)
+            if path in ('/api/preview', '/api/export'):
+                draft = self.get_draft(body.get('id'))
+                if path == '/api/preview':
+                    missing = [cmd for cmd in ('typst', 'pdfinfo', 'pdftotext') if not shutil.which(cmd)]
+                    if missing:
+                        raise ValueError('Install the PDF tools first: ' + ', '.join(missing) + '. See README setup.')
+                    try:
+                        return build_preview(draft, body.get('projects'), self.root, body['id'])
+                    except RenderError as e:
+                        raise ValueError('Could not compile the resume: ' + str(e)) from e
+                return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
 
+
+    def get_draft(self, ident):
+        draft = self.drafts.get(ident) if isinstance(ident, str) else None
+        if not draft or time.monotonic() - draft['created'] > 7200:
+            raise ValueError('This draft expired. Create a new tailored draft.')
+        return draft
 
     def create_draft(self, body):
         jd = text(body.get('jd'), 'Job description', 30000, True)
@@ -118,6 +137,19 @@ def handler(app):
                         return self.reply(200, app.state())
                 except (ValueError, OSError) as e:
                     return self.reply(400, {'error': str(e)})
+            if path.startswith('/api/pdf/'):
+                parts = path.split('/')
+                try:
+                    if len(parts) != 5:
+                        raise ValueError('Invalid PDF URL.')
+                    with app.lock:
+                        draft = app.get_draft(parts[3])
+                        preview = draft.get('preview')
+                        if not preview or parts[4] != preview['revision']:
+                            raise ValueError('This preview is out of date. Build a new preview.')
+                        return self.reply(200, preview['path'].read_bytes(), 'application/pdf')
+                except (ValueError, OSError) as e:
+                    return self.reply(404, {'error': str(e)})
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}

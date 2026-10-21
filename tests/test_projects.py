@@ -66,6 +66,14 @@ class DescriptionTests(unittest.TestCase):
         self.assertIn('Check each claim', draft['notice'])
         self.assertEqual(draft['project']['_readme'], evidence['readme'])
 
+    @patch('resume.descriptions.llm.have_key', return_value=False)
+    def test_single_paragraph_readme_provides_distinct_facts(self, _):
+        evidence = {'name': 'server', 'description': 'An HTTP server built using sockets.', 'language': 'C++',
+                    'url': 'https://github.com/me/server', 'readme': '# server\nAn HTTP server built using sockets. Handles requests using a fixed worker pool and a bounded queue. Provides static file serving for local network clients.'}
+        draft = import_project(evidence, 'Backend job', SETTINGS)
+        self.assertEqual(len(draft['project']['bullets']), 3)
+        self.assertIn('worker pool', draft['project']['bullets'][1]['text'])
+
     @patch('resume.descriptions.llm.have_key', return_value=True)
     @patch('resume.descriptions.llm.ask')
     def test_import_rejects_invented_metrics(self, ask, _):
