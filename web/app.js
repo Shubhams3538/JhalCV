@@ -82,13 +82,28 @@ function bulletEditor(entry, allowPlanned = true) {
   render();
   return wrap;
 }
+function focusEditor(project) {
+  const options = {agentic: 'AI / agents', backend: 'Backend', systems: 'Systems',
+    infra: 'Infrastructure', frontend: 'Frontend', data: 'Data / ML',
+    eval: 'Testing / evaluation', dsa: 'DSA', teaching: 'Teaching'};
+  const wrap = el('fieldset', {class: 'wide focus-options'}, [el('legend', {text: 'Focus areas'})]);
+  for (const [value, name] of Object.entries(options)) {
+    const input = el('input', {type: 'checkbox', checked: (project.angles || []).includes(value),
+      onchange: e => {
+        const values = new Set(project.angles || []);
+        e.target.checked ? values.add(value) : values.delete(value);
+        project.angles = [...values]; invalidate();
+      }});
+    wrap.append(el('label', {class: 'focus-option'}, [input, el('span', {text: name})]));
+  }
+  return wrap;
+}
 function projectEditor(p) {
   return el('div', {class: 'form-grid'}, [
     field('Project name', p.name, v => p.name = v),
     field('Technologies (comma separated)', (p.stack || []).join(', '), v => p.stack = commaList(v)),
     field('GitHub / project URL', p.link?.url || '', v => {if (v.trim()) p.link = {label: 'GitHub', url: v}; else delete p.link;}),
-    field('Focus areas (comma separated)', (p.angles || []).join(', '), v => p.angles = commaList(v)),
-    field('Short introduction', Object.values(p.taglines || {})[0] || '', v => {p.taglines = Object.fromEntries((p.angles?.length ? p.angles : ['backend']).map(a => [a, v]));}, {wide: true}),
+    focusEditor(p),
     bulletEditor(p)
   ]);
 }
@@ -101,7 +116,7 @@ function renderProjects() {
     const summary = el('summary', {}, [check, el('span', {class: 'project-icon', text: '⌘'}),
       el('span', {class: 'project-info'}, [el('strong', {text: p.name}), el('small', {text: (p.stack || []).join(' · ')})]), el('span', {text: '⌄'})]);
     const card = el('details', {class: 'project-card'}, [summary, projectEditor(p)]);
-    card.append(el('p', {class: 'hint', text: 'Focus areas: agentic, backend, systems, infra, frontend, data, eval, dsa, teaching. Saved edits stay available for future jobs.'}));
+    card.append(el('p', {class: 'hint', text: 'Choose the focus areas that describe the actual project. Saved edits stay available for future jobs.'}));
     card.append(el('button', {class: 'secondary', text: 'Save project edits', onclick: e => task(e.target, async () => {await saveProfile(); renderProjects();})}));
     card.append(el('button', {class: 'danger', text: 'Remove project', onclick: () => {profile.projects = profile.projects.filter(x => x.id !== p.id); selected.delete(p.id); invalidate(); renderProjects(); notify('Project removed from this draft. Save your profile to keep the removal.');}}));
     list.append(card);
@@ -196,7 +211,7 @@ async function init() {
     invalidate(); notify('Settings saved.');
   });};
   $('#manual-project').onclick = () => {
-    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], taglines: {backend: 'A short introduction to the project'}, bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
+    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
     selected.add(id); invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
   };
   $('#import-project').onclick = e => task(e.target, importProject);

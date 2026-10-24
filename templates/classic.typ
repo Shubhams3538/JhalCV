@@ -68,14 +68,18 @@
 
 // `gap` is passed in so the first entry after a section rule sits closer than
 // entries sit to each other.
-#let entry(left-top, right-top, left-bottom, right-bottom, items, gap: none, head: none) = {
+#let entry(left-top, right-top, left-bottom, right-bottom, items, gap: none, head: none, subline: true) = {
   block(above: if gap == none { entry-gap } else { gap }, below: 0pt, breakable: false)[
     #block(below: 0pt)[
-      #stack(
-        spacing: if head == none { head-gap } else { head },
-        two-col(left-top, right-top),
-        two-col(left-bottom, right-bottom),
-      )
+      #if subline {
+        stack(
+          spacing: if head == none { head-gap } else { head },
+          two-col(left-top, right-top),
+          two-col(left-bottom, right-bottom),
+        )
+      } else {
+        two-col(left-top, right-top)
+      }
     ]
     #if items.len() > 0 { bullets(items) }
   ]
@@ -123,13 +127,12 @@
       text(weight: "bold", size: body-size + 0.5pt)[#p.name]
     }
     let right = if "link" in p { link(p.link.url)[#p.link.label] } else { [] }
-    let tl = p.at("tagline", default: none)
     entry(
       head, text(size: body-size)[#right],
-      if tl != none { text(style: "italic")[#tl] } else { [] }, [],
+      [], [],
       p.bullets,
       gap: if i == 0 { 0pt } else { entry-gap },
-      head: head-gap + 3pt,
+      subline: false,
     )
   }
 }

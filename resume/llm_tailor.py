@@ -340,9 +340,6 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
                      "_bullet_meta": [{"id": b, "score": 0.0} for b in ids]}
         if "link" in proj:
             entry_out["link"] = proj["link"]
-        tagline = proj.get("taglines", {}).get(angle)
-        if tagline:
-            entry_out["tagline"] = tagline
         chosen.append(entry_out)
 
     if not chosen:

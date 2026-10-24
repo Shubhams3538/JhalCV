@@ -271,9 +271,6 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
         }
         if "link" in p:
             entry["link"] = p["link"]
-        tagline = p.get("taglines", {}).get(angle)
-        if tagline:
-            entry["tagline"] = tagline
         projects.append(entry)
         report["decisions"].append({
             "section": "projects", "name": p["name"], "score": p["_score"],

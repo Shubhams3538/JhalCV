@@ -53,7 +53,8 @@ READMEs can contain plans, examples, or claims about other contributors.
 For existing bullets, every AI rewrite and every reviewed edit must fit the
 **original character count AND word count**, keep the same bullet count, and
 introduce no new numbers. Invalid AI edits fall back to the original bullet.
-Headings, taglines, project stacks, and the template are unchanged by rewriting.
+Project headings and stacks are unchanged by rewriting. Projects display their
+heading and bullets, with no short introduction.
 
 The original selected content is first fitted using the existing one-page
 renderer. Reviewed wording is then compiled with exactly that baseline's font,
@@ -174,10 +175,9 @@ tailorer only *selects and reorders*. That property is what makes it safe to
 automate.
 
 Bullets carry `angles` from a closed enum (`agentic backend systems infra
-frontend data eval dsa teaching`). Projects also carry `taglines` keyed by
-angle, so one project introduces itself as *"thread-pooled HTTP server"* for a
-systems role and *"from-scratch HTTP server with connection pooling"* for a
-backend one. Same project, different framing, nothing invented.
+frontend data eval dsa teaching`). Projects show their name, technology stack,
+GitHub link, and selected bullets. Legacy `taglines` in existing profiles are
+accepted but do not appear in the editor or PDF.
 
 Bullets also carry `status`: `shipped` (default) or `planned`. Planned bullets
 never render and no tailorer is shown them — write them ahead as a spec, flip
