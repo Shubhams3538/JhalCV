@@ -118,7 +118,12 @@ function renderProjects() {
     const card = el('details', {class: 'project-card'}, [summary, projectEditor(p)]);
     card.append(el('p', {class: 'hint', text: 'Choose the focus areas that describe the actual project. Saved edits stay available for future jobs.'}));
     card.append(el('button', {class: 'secondary', text: 'Save project edits', onclick: e => task(e.target, async () => {await saveProfile(); renderProjects();})}));
-    card.append(el('button', {class: 'danger', text: 'Remove project', onclick: () => {profile.projects = profile.projects.filter(x => x.id !== p.id); selected.delete(p.id); invalidate(); renderProjects(); notify('Project removed from this draft. Save your profile to keep the removal.');}}));
+    card.append(el('button', {class: 'danger', text: 'Remove project', onclick: e => task(e.target, async () => {
+      await api('projects/remove', {id: p.id});
+      profile.projects = profile.projects.filter(x => x.id !== p.id);
+      selected.delete(p.id); invalidate(); renderProjects();
+      notify('Project removed from your saved library.');
+    })}));
     list.append(card);
   });
   if (!profile.projects.length) list.append(el('p', {class: 'empty', text: 'Start with a GitHub link or add a project manually.'}));

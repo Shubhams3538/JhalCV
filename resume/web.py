@@ -44,6 +44,18 @@ class App:
             if path == '/api/profile':
                 self.store.save_profile(body)
                 return {'saved': True}
+            if path == '/api/projects/remove':
+                text(body.get('id'), 'Project ID', 500, True)
+                ident = body['id']
+                if not self.store.profile_path.exists():
+                    return {'removed': False}
+                profile = self.store.profile()
+                remaining = [p for p in profile['projects'] if p['id'] != ident]
+                if len(remaining) == len(profile['projects']):
+                    return {'removed': False}
+                profile['projects'] = remaining
+                self.store.save_profile(profile)
+                return {'removed': True}
             if path == '/api/settings':
                 return self.store.save_settings(body)
             if path == '/api/import':

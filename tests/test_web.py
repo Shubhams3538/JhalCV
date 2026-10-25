@@ -67,6 +67,39 @@ class WebTests(unittest.TestCase):
             self.assertEqual(stored[key], profile[key])
         self.assertEqual(stored['experience'][0]['bullets'], [b['text'] for b in profile['experience'][0]['bullets']])
 
+    def test_remove_project_persists_after_reload_and_restart(self):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        ident = profile['projects'][0]['id']
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        self.assertEqual(self.request('/api/projects/remove', {'id': ident}, headers), {'removed': True})
+        reloaded = self.request('/api/state')['profile']
+        self.assertEqual(reloaded['projects'], [])
+        self.assertEqual(App(self.root).store.profile()['projects'], [])
+        for key in ('basics', 'experience', 'education', 'skills', 'coding_profiles'):
+            self.assertEqual(reloaded[key], profile[key])
+        self.assertEqual(self.request('/api/projects/remove', {'id': ident}, headers), {'removed': False})
+
+    def test_remove_matches_the_exact_saved_id(self):
+        profile = self.app.store.profile()
+        profile['projects'][0]['id'] = ' project-one '
+        self.app.store.save_profile(profile)
+        self.assertEqual(self.app.post('/api/projects/remove', {'id': ' project-one '}), {'removed': True})
+        self.assertEqual(self.app.store.profile()['projects'], [])
+
+    def test_remove_unsaved_project_does_not_save_sample_profile(self):
+        self.assertEqual(self.app.post('/api/projects/remove', {'id': 'unsaved-project'}), {'removed': False})
+        self.assertFalse(self.app.store.profile_path.exists())
+
+    def test_remove_failure_preserves_saved_project(self):
+        self.app.store.save_profile(self.app.store.profile())
+        before = self.app.store.profile_path.read_bytes()
+        ident = self.app.store.profile()['projects'][0]['id']
+        with patch.object(self.app.store, 'save_profile', side_effect=OSError('Disk full')):
+            with self.assertRaises(OSError):
+                self.app.post('/api/projects/remove', {'id': ident})
+        self.assertEqual(self.app.store.profile_path.read_bytes(), before)
+
     def test_expired_or_unknown_draft_has_useful_error(self):
         with self.assertRaisesRegex(ValueError, 'expired'):
             self.app.get_draft('../profile.json')
