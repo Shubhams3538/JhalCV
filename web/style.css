@@ -754,3 +754,67 @@ iframe {
   width: 14px;
   accent-color: var(--blue);
 }
+
+.folder-picker {
+  display: flex;
+  gap: 8px;
+}
+.folder-picker input {
+  min-width: 0;
+  flex: 1;
+}
+@media (max-width: 650px) {
+  .folder-picker {
+    flex-wrap: wrap;
+  }
+  .folder-picker input {
+    flex-basis: 100%;
+  }
+}
+
+.api-panel .subtle { margin-top: 0; }
+.api-panel .primary { margin-top: 12px; }
+.key-card {
+  display: flex; gap: 12px; align-items: center;
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 14px; margin: 10px 0;
+}
+.key-provider-icon {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 34px; height: 34px; background: var(--pale);
+  border-radius: 8px; color: var(--blue); font-weight: 700;
+}
+.key-details { min-width: 0; flex: 1; }
+.key-details strong { font-size: 12px; display: block; overflow-wrap: anywhere; }
+.key-provider { display: block; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.key-mask { display: block; color: #929db0; letter-spacing: 3px; font-size: 13px; }
+.key-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.key-actions .text-button { font-size: 10px; padding: 5px 0; }
+.remove-key { color: #b96272; }
+.reminder-toggle { display: flex; gap: 9px; align-items: center; margin-top: 24px; }
+.reminder-toggle input { width: 15px; accent-color: var(--blue); }
+.environment-settings { margin-top: 20px; }
+.environment-settings summary { font-size: 11px; color: var(--muted); cursor: pointer; }
+dialog {
+  width: min(450px, calc(100% - 34px)); padding: 32px;
+  border: 1px solid var(--line); border-radius: 14px;
+  color: var(--ink); background: white; box-shadow: 0 20px 80px #14254a30;
+}
+dialog::backdrop { background: #17243f60; backdrop-filter: blur(3px); }
+dialog h2 { font: 30px/1.2 Georgia, serif; letter-spacing: -.7px; }
+dialog p { color: var(--muted); font-size: 12px; line-height: 1.8; }
+dialog .eyebrow { margin-top: 20px; }
+.dialog-symbol { font-size: 26px; color: var(--blue); background: var(--pale); width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; }
+.dialog-actions { display: flex; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
+dialog .text-button { display: block; font-size: 11px; padding-bottom: 4px; }
+dialog small { font-size: 9px; color: var(--muted); }
+@media (max-width: 650px) {
+  .key-card { flex-wrap: wrap; }
+  .key-actions { flex-basis: 100%; justify-content: flex-end; }
+  dialog { padding: 24px; }
+}
+
+.key-model-editor { margin-top: 6px; }
+.key-model-editor summary { cursor: pointer; font-size: 10px; color: var(--blue); }
+.key-model-editor select, .key-model-editor input { margin-top: 8px; }
+.key-model-editor button { margin-top: 8px; }

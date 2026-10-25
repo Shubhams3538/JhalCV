@@ -60,6 +60,14 @@ class StorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Choose AI, backend'):
             validate_profile(self.profile)
 
+    def test_selected_folder_path_preserves_valid_trailing_spaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            selected = Path(directory).resolve() / 'resumes '
+            settings = store.save_settings({'filename': 'shubham_Resume', 'output_dir': str(selected), 'model': 'test', 'tailorer': 'rules'})
+            self.assertEqual(settings['output_dir'], str(selected))
+            self.assertEqual(store.settings()['output_dir'], str(selected))
+
     def test_filename_cannot_escape_destination(self):
         with self.assertRaises(ValueError):
             Store(ROOT).validate_settings({'filename': '../profile.json', 'output_dir': 'build', 'model': 'gpt-5.5', 'tailorer': 'rules'})

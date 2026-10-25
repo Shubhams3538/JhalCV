@@ -1,7 +1,9 @@
-"""Render a reviewed draft at the original layout, then export without overwrites."""
+"""Render a reviewed draft; keep one current PDF and archive previous versions."""
 from __future__ import annotations
 
 import copy
+import shutil
+from contextlib import contextmanager
 import os
 import secrets
 import tempfile
@@ -63,31 +65,99 @@ def build_preview(draft, edits, root, ident):
     return {'revision': revision, 'url': f'/api/pdf/{ident}/{revision}', 'checks': checks, 'notices': notices, 'pages': 1}
 
 
+
+@contextmanager
+def folder_lock(destination):
+    # Keep a stable lock file: removing it could let different processes lock
+    # different inodes. OS locks are released automatically on process exit.
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)
+    fd = os.open(destination / '.jhalcv-save.lock', flags, 0o600)
+    with os.fdopen(fd, 'r+b') as lock:
+        if os.name == 'nt':
+            import msvcrt
+            if os.fstat(lock.fileno()).st_size == 0:
+                lock.write(b'0'); lock.flush()
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as e:
+                raise ValueError('Another resume is being saved in this folder. Try again in a moment.') from e
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as e:
+                raise ValueError('Another resume is being saved in this folder. Try again in a moment.') from e
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
 def export_preview(draft, revision, settings):
     preview = draft.get('preview')
     if not preview or not isinstance(revision, str) or revision != preview['revision']:
         raise ValueError('Build and review the latest PDF preview before saving.')
-    if preview.get('exported'):
-        return {'path': str(preview['exported'])}
     destination = Path(settings['output_dir'])
     destination.mkdir(parents=True, exist_ok=True)
+    with folder_lock(destination):
+        return _save_current(preview, destination, settings['filename'])
+
+
+def _save_current(preview, destination, filename):
+    target = destination / f'{filename}.pdf'
+    # Re-saving the same preview is a no-op only while that exact PDF is current.
+    # If another draft replaced it, explicitly saving this preview restores it.
+    if preview.get('exported') == target and target.is_file() and not target.is_symlink():
+        if target.read_bytes() == preview['path'].read_bytes():
+            return {'path': str(target)}
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError('The resume destination must be a regular PDF file, not a link or folder.')
     fd, temporary = tempfile.mkstemp(dir=destination, prefix='.jhalcv-', suffix='.tmp')
+    archived = None
     try:
         with os.fdopen(fd, 'wb') as out:
             out.write(preview['path'].read_bytes())
             out.flush()
             os.fsync(out.fileno())
-        # Hard-link a fully written temporary file: atomic creation without ever
-        # replacing an existing resume or following a destination symlink.
-        for number in range(1, 10001):
-            suffix = '' if number == 1 else f'_{number}'
-            target = destination / f'{settings["filename"]}{suffix}.pdf'
-            try:
-                os.link(temporary, target)
-                preview['exported'] = target
-                return {'path': str(target)}
-            except FileExistsError:
-                continue
-        raise ValueError('Too many files with this name. Choose another filename in Settings.')
+        if target.exists():
+            archive = destination / 'Archive'
+            if archive.is_symlink():
+                raise ValueError('Archive must be a regular folder, not a symbolic link.')
+            archive.mkdir(exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S_%f')
+            for _ in range(10):
+                archived = archive / f'{filename}_{stamp}_{secrets.token_hex(4)}.pdf'
+                created = False
+                try:
+                    # Exclusive copying also works on drives without hard links.
+                    # Keep the original timestamps on archived versions.
+                    with archived.open('xb') as backup:
+                        created = True
+                        with target.open('rb') as previous:
+                            shutil.copyfileobj(previous, backup)
+                        backup.flush()
+                        os.fsync(backup.fileno())
+                    shutil.copystat(target, archived, follow_symlinks=False)
+                    break
+                except FileExistsError:
+                    if created:
+                        archived.unlink(missing_ok=True)
+                        raise
+                    archived = None
+                except OSError:
+                    if created:
+                        archived.unlink(missing_ok=True)
+                    raise
+            if archived is None:
+                raise ValueError('Could not reserve an archive filename. Try saving again.')
+        # The complete new PDF becomes current atomically; failures above leave
+        # the previous current PDF intact. Archive names are never overwritten.
+        os.replace(temporary, target)
+        preview['exported'] = target
+        return {'path': str(target), **({'archived': str(archived)} if archived else {})}
     finally:
         Path(temporary).unlink(missing_ok=True)

@@ -13,29 +13,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .llm import have_key
+from . import llm
+from .credentials import CredentialStore, PROVIDERS
 from .storage import Store, text
 from .github import fetch_repository
 from .descriptions import import_project, rewrite_projects, budget
 from .tailor import tailor
 from .workspace import build_preview, export_preview
 from .render import RenderError
+from .folders import choose_folder
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
 
 
 class App:
-    def __init__(self, root=ROOT):
+    def __init__(self, root=ROOT, *, include_env=True):
         self.root = Path(root)
         self.store = Store(root)
+        self.credentials = CredentialStore(root, include_env=include_env)
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
 
     def state(self):
         return {'profile': self.store.profile(), 'settings': self.store.settings(),
-                'example': not self.store.profile_path.exists(), 'ai_available': have_key(),
+                'example': not self.store.profile_path.exists(),
+                'ai_available': bool(self.credentials.routes(self.store.settings()['model'])),
+                'credentials': self.credentials.public(self.store.settings()['model']),
                 'dependencies': {cmd: bool(shutil.which(cmd)) for cmd in ('typst', 'pdfinfo', 'pdftotext')},
                 'token': self.token}
 
@@ -56,13 +61,48 @@ class App:
                 profile['projects'] = remaining
                 self.store.save_profile(profile)
                 return {'removed': True}
+            if path == '/api/folder':
+                initial = body.get('initial', self.store.settings()['output_dir'])
+                text(initial, 'Destination folder', 2000, True)
+                initial_path = Path(initial).expanduser()
+                if not initial_path.is_absolute():
+                    initial_path = self.root / initial_path
+                return {'path': choose_folder(initial_path)}
+            if path.startswith('/api/keys/'):
+                if path == '/api/keys/add':
+                    self.credentials.add(body)
+                elif path == '/api/keys/remove':
+                    self.credentials.remove(body.get('id'))
+                elif path == '/api/keys/prefer':
+                    self.credentials.prefer(body.get('id'))
+                elif path == '/api/keys/model':
+                    self.credentials.set_model(body.get('id'), body.get('model'))
+                elif path == '/api/keys/reminder':
+                    self.credentials.reminder(body.get('dismissed'))
+                else:
+                    raise ValueError('Unknown API-key action.')
+                return self.credentials.public(self.store.settings()['model'])
             if path == '/api/settings':
                 return self.store.save_settings(body)
             if path == '/api/import':
                 jd = text(body.get('jd', ''), 'Job description', 30000)
-                return import_project(fetch_repository(body.get('url')), jd, self.store.settings())
+                evidence = fetch_repository(body.get('url'))
+                settings = self.store.settings()
+                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
+                    result = import_project(evidence, jd, settings)
+                result['notice'] += self.inference_notice(session)
+                return result
             if path == '/api/tailor':
-                return self.create_draft(body)
+                settings = self.store.settings()
+                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
+                    result = self.create_draft(body)
+                suffix = self.inference_notice(session)
+                result['notice'] += suffix
+                draft = self.drafts[result['id']]
+                draft['notice'] += suffix
+                draft['report']['providers_used'] = session['used']
+                draft['report']['key_failover_count'] = len(session['events'])
+                return result
             if path in ('/api/preview', '/api/export'):
                 draft = self.get_draft(body.get('id'))
                 if path == '/api/preview':
@@ -76,6 +116,15 @@ class App:
                 return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
 
+
+    @staticmethod
+    def inference_notice(session):
+        if not session['events']:
+            return ''
+        if session['used'] and not session['last_call_failed']:
+            name = PROVIDERS[session['used'][-1]['provider']]['name']
+            return f' A configured key failed; automatically continued with {name}.'
+        return ' Configured keys were unavailable; original wording and rules were used.'
 
     def get_draft(self, ident):
         draft = self.drafts.get(ident) if isinstance(ident, str) else None

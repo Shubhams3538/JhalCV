@@ -17,7 +17,7 @@ brew install typst poppler
 Then, from this repository:
 
 ```bash
-cp .env.example .env       # optional: add your own OPENAI_API_KEY
+cp .env.example .env       # optional: existing environment-key workflow
 ./start.sh
 # Windows, or any platform without sh:
 python3 app.py
@@ -26,6 +26,28 @@ python3 app.py
 The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
 Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
 URL yourself, use `python3 app.py --port 8765 --no-browser`.
+
+In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, or
+OpenRouter keys. A provider-specific model menu selects a default automatically;
+you can choose another named model or **Other model…** for a custom ID. Saved
+entries offer **Change model** without requiring the key again. You can keep several
+keys and use **Try first** to set priority. Failed keys are skipped for the rest
+of the current operation; another configured key/provider is tried automatically.
+If none succeeds, JhalCV preserves original wording and uses rules.
+
+Saved credentials are never sent back to the browser, not even partial prefixes
+or suffixes. Every entry displays the same dummy mask. New keys are entered in
+a password field, sent to the local backend, and cleared from the form on
+submission. They are stored in a permission-restricted `.local/credentials.json`
+file (0600 on macOS/Linux), **not encrypted at rest**. Keys are excluded from
+provider error messages, request-body caches, and reports. User-entered keys
+necessarily pass through the browser when first submitted; saved keys are never
+retrieved by the frontend.
+
+When no key is configured, a startup dialog offers **Add an API key**, **Not
+now**, or **I will never add an API key**. The last option is saved locally and
+stops future reminders. You can re-enable reminders in Settings. Rules mode
+continues to work without credentials.
 
 1. Open **My profile**, replace the sample contact details, experience,
    education, achievements, and skills, then save. An existing `profile.json`
@@ -39,9 +61,14 @@ URL yourself, use `python3 app.py --port 8765 --no-browser`.
    projects and lightly refines their bullets; rules work without an API key.
 4. Review the tailored bullet wording, then **Build PDF preview**. Check the
    PDF and any text-check warnings, then **Save to destination**.
-5. Change the output folder and filename in **Settings**. The default is
-   `build/shubham_Resume.pdf`. Existing files are never replaced: later exports
-   use `shubham_Resume_2.pdf`, and so on. The saved path is shown after export.
+5. Use **Choose folder…** in **Settings** to pick your saving folder, or enter
+   its path, then save settings. The default is `build/shubham_Resume.pdf`.
+   Each new export becomes the current file with that same name. The previous
+   PDF is preserved under `Archive/` with a unique dated filename. The saved
+   path is shown after export. Sort your file picker by **Date modified, newest
+   first** to put the most recently saved resume at the top; picker sorting
+   remains controlled by your operating system. Native selection uses macOS,
+   Windows, or Linux (Zenity/KDialog) dialogs, with manual path entry as fallback.
 
 ### Clarity and the page budget
 
@@ -68,7 +95,8 @@ identical line wrapping, so the rendered PDF is the final check.
 ### Local data and optional network services
 
 - `profile.json`: your source profile and confirmed project evidence.
-- `.local/settings.json`: your output folder, filename, mode, and model.
+- `.local/settings.json`: your output folder, filename, mode, and environment model.
+- `.local/credentials.json`: private keys, provider/model choices, priority, and reminder preference.
 - `.cache/web/`: PDF previews, rendered JSON, and decision reports including JDs.
 - `.cache/llm/`: cached model requests and responses.
 
@@ -85,9 +113,20 @@ links. Moved repositories need their current URL. API keys/tokens stay in the
 local Python process and never reach the frontend.
 
 In AI mode, your JD and relevant profile/project content are sent directly to
-OpenAI; README import contacts GitHub. **Rules only** in Settings makes no AI
-requests and uses README excerpts for import. Failed/invalid AI requests fall
-back to original wording and rule-based selection with a visible explanation.
+your configured providers; automatic failover can send the same content to
+another configured provider. README import contacts GitHub. **Rules only** in
+Settings makes no AI requests and uses README excerpts for import. Environment
+keys remain supported via `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`ANTHROPIC_API_KEY`, and `OPENROUTER_API_KEY`. **Ignore** hides an environment
+key from JhalCV without modifying the environment file.
+
+Provider adapters use native structured JSON requests: [OpenAI](https://developers.openai.com/api/docs/guides/structured-outputs),
+[Gemini](https://ai.google.dev/gemini-api/docs/generate-content/structured-output),
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+and [OpenRouter](https://openrouter.ai/docs/guides/features/structured-outputs).
+Model IDs are editable because availability depends on your provider account.
+Requests are limited to fixed official endpoints; keys travel only in headers.
+Responses are validated locally before use or caching.
 
 ### Verification
 
@@ -98,8 +137,10 @@ python3 -m unittest discover -s tests -v
 The suite covers storage validation, HTTP origin/token protection, GitHub URL
 and README handling, AI length/number fallback, fixed-section preservation,
 PDF overflow handling, real Typst/Poppler rendering, custom folders, stale
-previews, and filename collisions. PDF integration tests skip if tools are not
-installed.
+previews, archive preservation, and concurrent export protection. PDF integration tests skip if tools are not
+installed. Provider tests use mocked native responses and failures to check
+automatic failover, response validation, cache isolation, and credential privacy.
+These fixtures do not prove model availability on a particular provider account.
 
 ## Original terminal workflow
 

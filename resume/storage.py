@@ -175,7 +175,8 @@ class Store:
         filename = text(value.get('filename'), 'Filename', 100, True)
         if not re.fullmatch(r'[\w -]+', filename) or filename in ('.', '..'):
             raise ValueError('Filename: use letters, numbers, spaces, hyphens or underscores; omit .pdf.')
-        folder = text(value.get('output_dir'), 'Output folder', 2000, True)
+        folder = value.get('output_dir')
+        text(folder, 'Output folder', 2000, True)
         path = Path(folder).expanduser()
         if not path.is_absolute():
             path = self.root / path

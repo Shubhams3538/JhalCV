@@ -406,7 +406,7 @@ def tailor_llm(profile: dict, jd_text: str, *, max_projects: int = 2,
     report["tailorer"] = "rules"
 
     if not llm.have_key():
-        report["llm"] = {"used": False, "reason": "no OPENAI_API_KEY"}
+        report["llm"] = {"used": False, "reason": "no available API key"}
         return data, report
 
     try:

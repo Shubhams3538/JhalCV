@@ -100,6 +100,18 @@ class WebTests(unittest.TestCase):
                 self.app.post('/api/projects/remove', {'id': ident})
         self.assertEqual(self.app.store.profile_path.read_bytes(), before)
 
+    @patch('resume.web.choose_folder')
+    def test_folder_choice_does_not_persist_until_settings_are_saved(self, picker):
+        picker.return_value = str(self.root / 'chosen')
+        before = self.app.store.settings()
+        chosen = self.app.post('/api/folder', {'initial': 'new folder'})
+        self.assertEqual(chosen['path'], str(self.root / 'chosen'))
+        self.assertEqual(picker.call_args.args[0], self.root / 'new folder')
+        self.assertEqual(self.app.store.settings(), before)
+        picker.return_value = None
+        self.assertEqual(self.app.post('/api/folder', {}), {'path': None})
+        self.assertEqual(self.app.store.settings(), before)
+
     def test_expired_or_unknown_draft_has_useful_error(self):
         with self.assertRaisesRegex(ValueError, 'expired'):
             self.app.get_draft('../profile.json')

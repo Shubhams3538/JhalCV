@@ -1,11 +1,6 @@
-"""The only module in this project that touches the network.
+"""Provider-independent structured inference, local key failover, and caching.
 
-Deliberately dependency-free: one POST to the OpenAI REST API via urllib, so the
-project keeps its "brew install typst poppler, no Python packages" property. If
-this ever needs streaming, batching, or Azure, swap it for the `openai` SDK —
-`ask()` is the only symbol anything else imports.
-
-Nothing here knows what a resume is.
+The CLI and browser share ask(); provider wire formats live in provider_api.py.
 """
 
 from __future__ import annotations
@@ -13,18 +8,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import random
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
 
-API_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_MODEL = "gpt-4o-mini"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "llm"
 
-RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
-MAX_ATTEMPTS = 4
 
 
 class LLMError(RuntimeError):
@@ -70,13 +61,26 @@ def api_key() -> str:
     return key
 
 
-def have_key() -> bool:
-    """Cheap check so callers can pick a tailorer without catching exceptions."""
+_SESSION = ContextVar('jhalcv_credentials', default=None)
+
+
+@contextmanager
+def credential_scope(routes, cache_dir=None):
+    session = {'routes': routes, 'failed': set(), 'preferred': None, 'events': [],
+               'used': [], 'cache_dir': cache_dir, 'last_call_failed': False}
+    token = _SESSION.set(session)
     try:
-        api_key()
-        return True
-    except LLMAuthError:
-        return False
+        yield session
+    finally:
+        _SESSION.reset(token)
+
+
+def have_key() -> bool:
+    session = _SESSION.get()
+    if session is not None:
+        return any(r['id'] not in session['failed'] for r in session['routes'])
+    from .credentials import CredentialStore
+    return bool(CredentialStore().routes())
 
 
 # ── schema helpers ───────────────────────────────────────────────────────
@@ -115,8 +119,8 @@ def _cache_key(payload: dict) -> str:
     ).hexdigest()
 
 
-def _cache_read(key: str) -> dict | None:
-    f = CACHE_DIR / f"{key}.json"
+def _cache_read(key: str, directory=None) -> dict | None:
+    f = Path(directory or CACHE_DIR) / f"{key}.json"
     if not f.exists():
         return None
     try:
@@ -125,108 +129,77 @@ def _cache_read(key: str) -> dict | None:
         return None
 
 
-def _cache_write(key: str, request: dict, response: dict) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+def _cache_write(key: str, request: dict, response: dict, directory=None) -> None:
+    directory = Path(directory or CACHE_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
     # The request is stored alongside for debugging. It never contains the key:
     # auth travels in a header, not the body.
-    (CACHE_DIR / f"{key}.json").write_text(
+    (directory / f"{key}.json").write_text(
         json.dumps({"request": request, "response": response}, indent=2, ensure_ascii=False)
     )
 
 
 # ── the call ─────────────────────────────────────────────────────────────
 
-def _post(body: dict, key: str, timeout: int) -> dict:
-    req = urllib.request.Request(
-        API_URL,
-        data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    last_error = None
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:400]
-            if e.code in (401, 403):
-                raise LLMAuthError(f"OpenAI rejected the API key ({e.code}).") from e
-            if e.code not in RETRY_STATUS or attempt == MAX_ATTEMPTS - 1:
-                raise LLMError(f"OpenAI HTTP {e.code}: {detail}",
-                               status=e.code, body=detail) from e
-            # Honour Retry-After when the server sends it; otherwise back off.
-            wait = float(e.headers.get("Retry-After") or 0) or 2 ** attempt
-            last_error = f"HTTP {e.code}"
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise LLMError(f"OpenAI request failed: {e}") from e
-            wait = 2 ** attempt
-            last_error = str(e)
-        time.sleep(wait + random.uniform(0, 0.4))  # jitter, so retries don't sync up
-    raise LLMError(f"exhausted retries: {last_error}")
-
-
 def ask(prompt: str, schema: dict, *, model: str = DEFAULT_MODEL,
         system: str | None = None, temperature: float = 0.0,
         schema_name: str = "response", cache: bool = True,
         timeout: int = 60) -> tuple[dict, bool]:
-    """Ask for one structured answer.
-
-    Returns (parsed_response, cache_hit). The response is guaranteed to match
-    `schema` — OpenAI enforces it server-side in strict mode, so there is no
-    prose to parse and no malformed JSON to defend against.
-
-    Raises LLMError (or LLMAuthError) on any failure. Callers are expected to
-    catch and fall back, never to crash.
-    """
-    messages = ([{"role": "system", "content": system}] if system else []) + \
-               [{"role": "user", "content": prompt}]
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {"name": schema_name, "strict": True,
-                            "schema": strictify(schema)},
-        },
-    }
-
-    key_hash = _cache_key(body)
-    if cache:
-        hit = _cache_read(key_hash)
-        if hit is not None:
-            return hit, True
-
-    try:
-        raw = _post(body, api_key(), timeout)
-    except LLMError as e:
-        # Reasoning models reject `temperature` outright rather than ignoring it.
-        # Rather than maintaining a list of which families do that, drop the
-        # offending parameter once and retry. Determinism is lost, but a correct
-        # answer at the default beats no answer at all.
-        if e.status == 400 and "temperature" in e.body and "unsupported" in e.body.lower():
-            body.pop("temperature", None)
-            key_hash = _cache_key(body)
+    """Try configured keys in order. Never expose keys in errors or caches."""
+    from .credentials import CredentialStore
+    from .provider_api import call, validate_output
+    session = _SESSION.get()
+    if session is None:
+        with credential_scope(CredentialStore().routes(openai_model=model)):
+            return ask(prompt, schema, model=model, system=system, temperature=temperature,
+                       schema_name=schema_name, cache=cache, timeout=timeout)
+    routes = sorted(session['routes'], key=lambda r: r['id'] != session['preferred'])
+    if not routes:
+        raise LLMAuthError('No API keys configured. Add a key in Settings or use rules mode.')
+    deadline = time.monotonic() + 120
+    for route in routes:
+        if route['id'] in session['failed']:
+            continue
+        if time.monotonic() >= deadline:
+            break
+        payload = {'version': 2, 'provider': route['provider'], 'model': route['model'],
+                   'prompt': prompt, 'system': system, 'schema': strictify(schema),
+                   'temperature': temperature, 'schema_name': schema_name}
+        cache_key = _cache_key(payload)
+        def checked(value):
+            validate_output(value, payload['schema'])
+            encoded = json.dumps(value, ensure_ascii=False)
+            if any(r['key'] in encoded for r in routes):
+                raise LLMError('Provider response contained sensitive data and was discarded.')
+            return value
+        try:
+            result, hit = None, False
             if cache:
-                hit = _cache_read(key_hash)
-                if hit is not None:
-                    return hit, True
-            raw = _post(body, api_key(), timeout)
-        else:
-            raise
-    try:
-        choice = raw["choices"][0]["message"]
-        if choice.get("refusal"):
-            raise LLMError(f"model refused: {choice['refusal']}")
-        parsed = json.loads(choice["content"])
-    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as e:
-        raise LLMError(f"unexpected response shape: {e}") from e
-
-    if cache:
-        _cache_write(key_hash, body, parsed)
-    return parsed, False
+                cached = _cache_read(cache_key, session['cache_dir'])
+                if cached is not None:
+                    try:
+                        result, hit = checked(cached), True
+                    except LLMError:
+                        pass
+            if result is None:
+                result = checked(call(route, prompt, schema, system, temperature, schema_name,
+                                      max(1, min(timeout, 30, deadline - time.monotonic()))))
+                if cache:
+                    try:
+                        _cache_write(cache_key, payload, result, session['cache_dir'])
+                    except OSError:
+                        pass  # Cache failures must not waste a successful API call.
+            session['last_call_failed'] = False
+            session['preferred'] = route['id']
+            used = {'provider': route['provider'], 'model': route['model']}
+            if used not in session['used']:
+                session['used'].append(used)
+            return result, hit
+        except (LLMError, OSError):
+            session['failed'].add(route['id'])
+            session['events'].append({'provider': route['provider'], 'status': 'failed'})
+    session['last_call_failed'] = True
+    raise LLMError('Configured API keys were unavailable or returned invalid responses. Using rules mode.')
 
 
 if __name__ == "__main__":
