@@ -13,7 +13,8 @@ import re
 
 from . import llm
 from .tailor import (ANGLE_KEYWORDS, parse_jd as parse_jd_rules,
-                     tailor as tailor_rules, renderable, project_cap)
+                     tailor as tailor_rules, renderable, project_cap,
+                     _score_bullet, _score_project)
 
 # The closed angle enum. Kept in sync with the rule-based vocabulary by deriving
 # it from the same dict, so the two tailorers can never disagree about what
@@ -228,7 +229,8 @@ want to see, and order skills so the ones this job asks for come first."""
 
 
 def _catalog(profile: dict, max_projects: int, bullets_per_project: int) -> str:
-    lines = [f"PROJECTS — choose at most {max_projects}, "
+    required = min(max_projects, len(profile["projects"]))
+    lines = [f"PROJECTS — choose exactly {required}, "
              f"at most {bullets_per_project} bullets each."]
     for p in profile["projects"]:
         lines.append(f"\n  id: {p['id']}   name: {p['name']}")
@@ -341,6 +343,24 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
         if "link" in proj:
             entry_out["link"] = proj["link"]
         chosen.append(entry_out)
+
+    # The user already narrowed the library to the projects they want. When that
+    # fits the page, every one of them is shown, whatever the model returned.
+    required = min(max_projects, len(profile["projects"]))
+    if chosen and len(chosen) < required:
+        missing = sorted((p for p in profile["projects"] if p["id"] not in seen),
+                         key=lambda p: -_score_project(p, analysis))
+        for proj in missing[:required - len(chosen)]:
+            scored = sorted(proj["bullets"], key=lambda b: -_score_bullet(b, analysis))
+            ids = {b["id"] for b in scored[:bullets_per_project]}
+            kept = [b for b in proj["bullets"] if b["id"] in ids]
+            entry_out = {"name": proj["name"], "stack": proj.get("stack", []),
+                         "bullets": [b["text"] for b in kept],
+                         "_bullet_meta": [{"id": b["id"], "score": 0.0} for b in kept]}
+            if "link" in proj:
+                entry_out["link"] = proj["link"]
+            chosen.append(entry_out)
+            problems.append(f"{proj['id']}: selected by you but omitted by the model, added")
 
     if not chosen:
         raise llm.LLMError("selection returned no usable projects")
