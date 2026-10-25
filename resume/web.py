@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import time
 import json
 import secrets
+import sqlite3
 import shutil
 import threading
 import traceback
@@ -24,6 +26,7 @@ from .workspace import build_preview, export_preview
 from .render import RenderError
 from .folders import choose_folder
 from .insights import Insights, add_skill
+from .jobs.service import JobService
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -35,6 +38,7 @@ class App:
         self.store = Store(root)
         self.credentials = CredentialStore(root, include_env=include_env)
         self.insights = Insights(root)
+        self.jobs = JobService(root)
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
@@ -44,16 +48,25 @@ class App:
                 'example': not self.store.profile_path.exists(),
                 'ai_available': bool(self.credentials.routes(self.store.settings()['model'])),
                 'credentials': self.credentials.public(self.store.settings()['model']),
+                'profile_revision': self.profile_revision(),
                 'dependencies': {cmd: bool(shutil.which(cmd)) for cmd in ('typst', 'pdfinfo', 'pdftotext')},
                 'token': self.token}
 
     def post(self, path, body):
         with self.lock:
             if path == '/api/profile':
+                # A tab sends the revision it loaded, so an old tab cannot
+                # silently overwrite edits made elsewhere. Bare profiles are
+                # still accepted for scripts.
+                if set(body) == {'profile', 'revision'}:
+                    self.check_revision(body['revision'])
+                    body = body['profile']
                 self.store.save_profile(body)
-                return {'saved': True}
+                return {'saved': True, 'revision': self.profile_revision()}
             if path == '/api/projects/remove':
                 text(body.get('id'), 'Project ID', 500, True)
+                if 'revision' in body:
+                    self.check_revision(body['revision'])
                 ident = body['id']
                 if not self.store.profile_path.exists():
                     return {'removed': False}
@@ -63,7 +76,7 @@ class App:
                     return {'removed': False}
                 profile['projects'] = remaining
                 self.store.save_profile(profile)
-                return {'removed': True}
+                return {'removed': True, 'revision': self.profile_revision()}
             if path == '/api/folder':
                 initial = body.get('initial', self.store.settings()['output_dir'])
                 text(initial, 'Destination folder', 2000, True)
@@ -87,6 +100,8 @@ class App:
                 return self.credentials.public(self.store.settings()['model'])
             if path == '/api/settings':
                 return self.store.save_settings(body)
+            if path.startswith('/api/jobs/'):
+                return self.jobs_action(path, body)
             if path.startswith('/api/insights/'):
                 if path == '/api/insights/add':
                     if not self.store.profile_path.exists():
@@ -102,7 +117,8 @@ class App:
                 else:
                     raise ValueError('Unknown insights action.')
                 profile = self.store.profile()
-                return {'profile': profile, 'insights': self.insights.summary(profile)}
+                return {'profile': profile, 'insights': self.insights.summary(profile),
+                        'revision': self.profile_revision()}
             if path == '/api/import':
                 jd = text(body.get('jd', ''), 'Job description', 30000)
                 evidence = fetch_repository(body.get('url'))
@@ -135,6 +151,50 @@ class App:
                 return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
 
+
+    def jobs_action(self, path, body):
+        try:
+            return self._jobs_action(path, body)
+        except sqlite3.Error:
+            raise ValueError('The jobs database is busy or unreadable. Try again in a moment.') from None
+
+    def _jobs_action(self, path, body):
+        def ident():
+            try:
+                return int(body.get('id'))
+            except (TypeError, ValueError):
+                raise ValueError('Choose a job or source.') from None
+        profile = self.store.profile()
+        if path == '/api/jobs/detail':
+            job = self.jobs.store.job(ident())
+            return {key: job[key] for key in ('id', 'title', 'company', 'location', 'url', 'description')}
+        if path == '/api/jobs/sources/add':
+            self.jobs.add_source(body.get('name'), body.get('url'), body.get('include', ''), body.get('exclude', ''))
+        elif path == '/api/jobs/sources/remove':
+            self.jobs.store.remove_source(ident())
+        elif path == '/api/jobs/refresh':
+            if not self.jobs.store.sources():
+                raise ValueError('Add a careers page first.')
+            if not self.jobs.start(profile):
+                raise ValueError('A refresh is already running.')
+        elif path == '/api/jobs/recheck':
+            if not self.jobs.start(profile, recheck_only=True):
+                raise ValueError('A refresh is already running.')
+        elif path == '/api/jobs/status':
+            self.jobs.store.set_status(ident(), body.get('status'))
+        elif path == '/api/jobs/experience':
+            self.jobs.set_experience_years(body.get('years'))
+        else:
+            raise ValueError('Unknown jobs action.')
+        return self.jobs.state(profile)
+
+    def profile_revision(self):
+        path = self.store.profile_path
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16] if path.exists() else ''
+
+    def check_revision(self, revision):
+        if revision != self.profile_revision():
+            raise ValueError('Your profile was changed outside this tab. Reload the page to get the latest version, then redo this edit.')
 
     @staticmethod
     def inference_notice(session):
@@ -219,6 +279,13 @@ def handler(app):
                 try:
                     with app.lock:
                         return self.reply(200, app.state())
+                except (ValueError, OSError) as e:
+                    return self.reply(400, {'error': str(e)})
+            if path == '/api/jobs':
+                try:
+                    return self.reply(200, app.jobs.state(app.store.profile()))
+                except sqlite3.Error:
+                    return self.reply(400, {'error': 'The jobs database is busy or unreadable. Try again in a moment.'})
                 except (ValueError, OSError) as e:
                     return self.reply(400, {'error': str(e)})
             if path == '/api/insights':

@@ -126,7 +126,7 @@ function renderProjects() {
     card.append(el('p', {class: 'hint', text: 'Choose the focus areas that describe the actual project. Saved edits stay available for future jobs.'}));
     card.append(el('button', {class: 'secondary', text: 'Save project edits', onclick: e => task(e.target, async () => {await saveProfile(); renderProjects();})}));
     card.append(el('button', {class: 'danger', text: 'Remove project', onclick: e => task(e.target, async () => {
-      await api('projects/remove', {id: p.id});
+      state.profile_revision = (await api('projects/remove', {id: p.id, revision: state.profile_revision})).revision;
       profile.projects = profile.projects.filter(x => x.id !== p.id);
       selected.delete(p.id); invalidate(); renderProjects();
       notify('Project removed from your saved library.');
@@ -190,18 +190,119 @@ function renderProfile() {
   }})]));
   container.append(skills);
 }
+async function storeProfile(value) {
+  state.profile_revision = (await api('profile', {profile: value, revision: state.profile_revision})).revision;
+}
 async function saveProfile() {
-  await api('profile', profile);
+  await storeProfile(profile);
   state.example = false;
   notify('Profile saved on this computer.');
 }
 function showView(view) {
   document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== view);
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-  $('#breadcrumb').textContent = {workspace: 'Tailor resume', profile: 'My profile', insights: 'Insights', settings: 'Settings'}[view];
+  $('#breadcrumb').textContent = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', settings: 'Settings'}[view];
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
+  if (view === 'jobs') api('jobs').then(renderJobs).catch(e => notify(e.message, true));
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
+}
+let jobsData = null, jobsTab = 'eligible', jobsPoll = null;
+const JOB_TABS = [['eligible', 'Eligible'], ['unclear', 'Unclear'], ['no', 'Not eligible'], ['pending', 'Checking'],
+  ['applied', 'Applied'], ['hidden', 'Hidden'], ['all', 'All']];
+function jobInTab(job, tab) {
+  if (tab === 'hidden') return job.status === 'hidden';
+  if (job.status === 'hidden') return false;
+  if (tab === 'applied') return job.status === 'applied';
+  if (tab === 'all') return true;
+  if (job.status === 'applied') return false;
+  if (tab === 'pending') return !job.eligible;
+  return job.eligible === tab || (tab === 'eligible' && job.eligible === 'yes');
+}
+function ago(seconds) {
+  if (!seconds) return 'never';
+  const mins = Math.round((Date.now() / 1000 - seconds) / 60);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  if (mins < 48 * 60) return Math.round(mins / 60) + ' h ago';
+  return Math.round(mins / 1440) + ' days ago';
+}
+function renderJobs(data) {
+  jobsData = data;
+  const running = data.progress.running;
+  $('#jobs-source-count').textContent = data.sources.length + (data.sources.length === 1 ? ' SOURCE' : ' SOURCES');
+  const sources = $('#jobs-sources'); sources.replaceChildren();
+  for (const src of data.sources) {
+    const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
+      : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
+    sources.append(el('div', {class: 'source-row'}, [
+      el('div', {class: 'source-info'}, [el('strong', {text: src.name}), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status]),
+      el('span', {class: 'pill', text: src.label.toUpperCase()}),
+      el('button', {type: 'button', class: 'text-button', text: 'Remove', disabled: running, onclick: e => {
+        if (!confirm(`Remove ${src.name} and its collected jobs?`)) return;
+        task(e.target, async () => renderJobs(await api('jobs/sources/remove', {id: src.id})));
+      }})]));
+  }
+  if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No careers pages yet. Add one above.'}));
+  const exp = data.experience;
+  if (document.activeElement !== $('#jobs-years')) $('#jobs-years').value = exp.years;
+  $('#jobs-years-hint').textContent = exp.custom
+    ? `Using your own value. Your profile dates add up to ${exp.computed} years.`
+    : `Calculated from your profile's experience dates (${exp.computed} years). Change it if some roles should not count.`;
+  $('#jobs-years-reset').hidden = !exp.custom;
+  const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
+  $('#jobs-progress').textContent = running ? data.progress.message
+    : data.progress.error ? 'Last refresh failed: ' + data.progress.error
+    : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Experience checks: ${agents}.`;
+  $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
+  $('#jobs-refresh').disabled = running;
+  $('#jobs-refresh').textContent = running ? 'Refreshing…' : 'Refresh now ↻';
+  const tabs = $('#jobs-tabs'); tabs.replaceChildren();
+  for (const [id, name] of JOB_TABS) {
+    const count = data.jobs.filter(j => jobInTab(j, id)).length;
+    tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab),
+      text: `${name} ${count}`, onclick: () => {jobsTab = id; renderJobs(jobsData);}}));
+  }
+  renderJobList();
+  clearTimeout(jobsPoll);
+  if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
+}
+function renderJobList() {
+  const data = jobsData, query = $('#jobs-search').value.trim().toLowerCase();
+  const jobs = data.jobs.filter(j => jobInTab(j, jobsTab) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
+  $('#jobs-count').textContent = data.jobs.filter(j => j.status !== 'hidden').length + ' JOBS';
+  const list = $('#jobs-list'); list.replaceChildren();
+  if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this view.' : 'Jobs appear here after a refresh.'}));
+  const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'missing'], unclear: ['UNCLEAR', '']};
+  for (const job of jobs.slice(0, 300)) {
+    const [label, tone] = verdicts[job.eligible] || ['CHECKING', ''];
+    const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
+    const meta = [job.company, job.location, job.posted && 'posted ' + job.posted].filter(Boolean).join(' · ');
+    const actions = el('div', {class: 'job-actions'}, [el('button', {type: 'button', class: 'secondary', text: 'Tailor resume', onclick: e => task(e.target, () => tailorForJob(job))})]);
+    if (job.status === 'hidden') actions.append(el('button', {type: 'button', class: 'text-button', text: 'Restore', onclick: setStatus('seen')}));
+    else {
+      actions.append(job.status === 'applied'
+        ? el('button', {type: 'button', class: 'text-button', text: 'Not applied', onclick: setStatus('seen')})
+        : el('button', {type: 'button', class: 'text-button', text: 'Mark applied', onclick: setStatus('applied')}));
+      actions.append(el('button', {type: 'button', class: 'text-button', text: 'Hide', onclick: setStatus('hidden')}));
+    }
+    list.append(el('div', {class: 'job-row'}, [
+      el('div', {class: 'job-info'}, [
+        el('div', {class: 'job-title'}, [el('a', {href: job.url, target: '_blank', rel: 'noopener', text: job.title}),
+          ...(job.status === 'new' ? [el('span', {class: 'job-new', text: 'NEW'})] : [])]),
+        el('small', {text: meta}),
+        ...(job.reason ? [el('small', {class: 'job-reason', text: job.reason + (job.checked_by === 'rules' ? ' (text rules)' : '')})] : [])]),
+      el('span', {class: 'pill ' + tone, text: label}), actions]));
+  }
+}
+async function tailorForJob(job) {
+  const detail = await api('jobs/detail', {id: job.id});
+  if (!detail.description.trim()) throw new Error('This job has no description saved yet. Refresh, or open the job and paste its description.');
+  $('#jd').value = `${detail.title} at ${detail.company}${detail.location ? ' (' + detail.location + ')' : ''}\n\n${detail.description}`.slice(0, 30000);
+  $('#jd').dispatchEvent(new Event('input'));
+  if (job.status === 'new') renderJobs(await api('jobs/status', {id: job.id, status: 'seen'}));
+  showView('workspace');
+  notify('Job description added. Choose your projects, then create the tailored draft.');
 }
 function insightBar(item) {
   const fill = el('span'); fill.style.width = item.percent + '%';
@@ -225,9 +326,9 @@ function renderInsights(data) {
       groups.map(g => el('option', {value: g, text: g})));
     const add = el('button', {type: 'button', class: 'secondary', text: 'Add to skills', disabled: !groups.length, onclick: e => task(e.target, async () => {
       if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
-      await api('profile', profile);
+      await storeProfile(profile);
       const result = await api('insights/add', {skill: item.skill, group: group.value});
-      profile = result.profile; invalidate(); renderInsights(result.insights);
+      profile = result.profile; state.profile_revision = result.revision; invalidate(); renderInsights(result.insights);
       notify(`${item.skill} added to ${group.value}. The AI can use it from your next resume.`);
     })});
     const hide = el('button', {type: 'button', class: 'text-button', text: 'Hide', onclick: e => task(e.target, async () => {
@@ -374,6 +475,22 @@ async function init() {
   };
   $('#import-project').onclick = e => task(e.target, importProject);
   $('#tailor').onclick = e => task(e.target, createDraft);
+  $('#jobs-source-form').onsubmit = e => {e.preventDefault(); task(e.submitter, async () => {
+    renderJobs(await api('jobs/sources/add', {name: $('#jobs-company').value, url: $('#jobs-url').value,
+      include: $('#jobs-include').value, exclude: $('#jobs-exclude').value}));
+    for (const id of ['#jobs-company', '#jobs-url', '#jobs-include', '#jobs-exclude']) $(id).value = '';
+    notify('Careers page added. Refresh to collect its jobs.');
+  });};
+  $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
+  $('#jobs-experience-form').onsubmit = e => {e.preventDefault(); task(e.submitter, async () => {
+    await api('jobs/experience', {years: $('#jobs-years').value});
+    renderJobs(await api('jobs/recheck', {})); notify('Experience saved. Rechecking jobs…');
+  });};
+  $('#jobs-years-reset').onclick = e => task(e.target, async () => {
+    await api('jobs/experience', {years: null});
+    renderJobs(await api('jobs/recheck', {})); notify('Using your profile dates. Rechecking jobs…');
+  });
+  $('#jobs-search').oninput = () => jobsData && renderJobList();
   $('#insights-unhide').onclick = e => task(e.target, async () => renderInsights((await api('insights/unhide', {})).insights));
   $('#insights-reset').onclick = e => {
     if (!confirm('Clear every analyzed job and hidden skill from Insights? Your profile is not changed.')) return;
@@ -389,7 +506,7 @@ async function importProject() {
     if (!imported.project.link?.url) throw new Error('Keep the GitHub source URL when confirming an import.');
     if (profile.projects.some(p => p.link?.url === imported.project.link.url)) throw new Error('This repository is already in your library. Edit its existing entry instead.');
     const next = structuredClone(profile); next.projects.push(imported.project);
-    await api('profile', next); profile = next; selected.add(imported.project.id); imported = null;
+    await storeProfile(next); profile = next; selected.add(imported.project.id); imported = null;
     wrap.hidden = true; $('#github-url').value = ''; invalidate(); renderProjects(); notify('Project added and saved.');
   })}), el('button', {class: 'text-button', text: 'Discard import', onclick: () => {imported = null; wrap.hidden = true;}}));
 }

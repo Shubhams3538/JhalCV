@@ -27,6 +27,14 @@ The user wants implementation without code walkthroughs. Read `AGENTS.local.md`;
 - Heading rows (company/city, role/dates, project/GitHub) render as one text line, so parsers no longer attach a city or link to the previous entry.
 - Unexpected server errors print a traceback to the terminal; the browser still gets the generic message. The user reported that message once; the cause is not yet identified.
 
+## Jobs collector (branch `jobs`, in progress)
+
+- Jobs page: the user adds careers URLs with filters already applied, plus optional title include/exclude keywords. Data lives in `.local/jobs.db` (SQLite).
+- Readers in `resume/jobs/sources.py`: Google Careers (embedded `ds:1` data), Amazon (`search.json`, with `country[]` renamed to `normalized_country_code[]`), Workday CXS API, Greenhouse, Lever, Ashby. Any other page is read by an agent from page text; only links that exist on the page are kept (first results page only).
+- Experience check (`resume/jobs/eligibility.py`): batches of 8 jobs sent to Codex first, then Claude Code (`resume/jobs/agents.py`), on the user's subscriptions. Agents run in an empty temp folder with no tools, and API-key env vars are removed. If both fail, a text-rule fallback runs. The years default to the profile dates and can be overridden.
+- `python3 -m resume.jobs refresh` runs a refresh from the terminal. Scheduling every 24 to 48 hours is not decided yet.
+- Profile saves now carry a revision, so a stale tab cannot overwrite newer profile edits.
+
 ## Private data and validation
 
 Do not overwrite the user's profile or environment file, or print credentials. `profile.json`, `.local/`, `.cache/`, and `build/` are ignored. Credentials are stored with mode 0600 in `.local/credentials.json`; they are not encrypted at rest.

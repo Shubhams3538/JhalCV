@@ -456,8 +456,26 @@ input:focus,textarea:focus,select:focus {
 .wide {
   grid-column:1/-1
 }
+.settings-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);
+  gap:24px;
+  align-items:start
+}
 .settings-panel {
-  max-width:650px
+  margin-bottom:0
+}
+.output-panel {
+  position:sticky;
+  top:20px
+}
+@media (max-width:1100px) {
+  .settings-grid {
+    grid-template-columns:1fr
+  }
+  .output-panel {
+    position:static
+  }
 }
 .settings-panel .primary {
   margin-top:22px
@@ -878,4 +896,125 @@ dialog small { font-size: 9px; color: var(--muted); }
 .insight-row > .pill {
   width:96px;
   text-align:center
+}
+.jobs-grid {
+  display:grid;
+  grid-template-columns:minmax(320px,.8fr) minmax(0,1.4fr);
+  gap:24px;
+  align-items:start
+}
+.source-row, .job-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto auto;
+  gap:12px;
+  align-items:center;
+  padding:12px 0;
+  border-top:1px solid var(--line)
+}
+#jobs-sources {
+  margin-top:18px
+}
+.source-info, .job-info {
+  display:flex;
+  flex-direction:column;
+  min-width:0
+}
+.source-info a {
+  font-size:11px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.source-info small, .job-info small {
+  color:var(--muted)
+}
+.job-error {
+  color:#a23d51!important
+}
+.experience-row {
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center
+}
+.experience-row label {
+  flex-basis:100%;
+  margin:0
+}
+.experience-row input {
+  width:110px
+}
+.jobs-toolbar {
+  display:flex;
+  gap:14px;
+  align-items:center;
+  margin-bottom:16px
+}
+.jobs-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-bottom:12px
+}
+.job-tab {
+  border:1px solid var(--line);
+  background:white;
+  border-radius:99px;
+  padding:5px 12px;
+  font-size:12px;
+  color:var(--muted)
+}
+.job-tab.active {
+  background:var(--pale);
+  border-color:#cbd6ff;
+  color:var(--blue);
+  font-weight:600
+}
+#jobs-search {
+  margin-bottom:6px
+}
+.job-title {
+  display:flex;
+  gap:8px;
+  align-items:center
+}
+.job-title a {
+  font-weight:600;
+  color:var(--ink);
+  text-decoration:none
+}
+.job-title a:hover {
+  color:var(--blue);
+  text-decoration:underline
+}
+.job-new {
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:1px;
+  color:var(--blue);
+  background:var(--pale);
+  border-radius:4px;
+  padding:2px 6px
+}
+.job-reason {
+  font-style:italic
+}
+.job-actions {
+  display:flex;
+  gap:8px;
+  align-items:center
+}
+.job-row > .pill {
+  width:104px;
+  text-align:center
+}
+@media (max-width:1100px) {
+  .jobs-grid {
+    grid-template-columns:1fr
+  }
+}
+@media (max-width:760px) {
+  .source-row, .job-row {
+    grid-template-columns:1fr
+  }
 }

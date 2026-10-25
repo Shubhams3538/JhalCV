@@ -46,6 +46,34 @@ class WebTests(unittest.TestCase):
         self.request('/api/profile', state['profile'], {'Content-Type': 'application/json', 'X-App-Token': state['token']})
         self.assertFalse(self.request('/api/state')['example'])
 
+    def test_stale_tab_cannot_overwrite_newer_profile(self):
+        state = self.request('/api/state')
+        headers = {'Content-Type': 'application/json', 'X-App-Token': state['token']}
+        first = self.request('/api/profile', {'profile': state['profile'], 'revision': state['profile_revision']}, headers)
+        changed = dict(state['profile'], basics=dict(state['profile']['basics'], name='Changed Elsewhere'))
+        self.request('/api/profile', {'profile': changed, 'revision': first['revision']}, headers)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/profile', {'profile': state['profile'], 'revision': first['revision']}, headers)
+        self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.app.store.profile()['basics']['name'], 'Changed Elsewhere')
+
+    def test_jobs_endpoints(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
+        self.assertEqual([(s['name'], s['label']) for s in state['sources']], [('Acme', 'Greenhouse')])
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/sources/add', {'name': 'Local', 'url': 'http://127.0.0.1:8765/'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        store = self.app.jobs.store
+        store.save_listing(state['sources'][0]['id'], [{'external_id': '1', 'title': 'Engineer', 'location': 'Remote',
+            'url': 'https://x.test/1', 'posted': '', 'requirements': '2 years', 'description': 'Build APIs.'}])
+        ident = self.request('/api/jobs')['jobs'][0]['id']
+        self.assertEqual(self.request('/api/jobs/detail', {'id': ident}, headers)['description'], 'Build APIs.')
+        state = self.request('/api/jobs/status', {'id': ident, 'status': 'applied'}, headers)
+        self.assertEqual(state['jobs'][0]['status'], 'applied')
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/status', {'id': ident, 'status': 'deleted'}, headers)
+
     def test_foreign_origin_and_host_are_rejected(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token, 'Origin': 'https://evil.test'}
         with self.assertRaises(urllib.error.HTTPError) as error:
@@ -93,7 +121,7 @@ class WebTests(unittest.TestCase):
         self.app.store.save_profile(profile)
         ident = profile['projects'][0]['id']
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
-        self.assertEqual(self.request('/api/projects/remove', {'id': ident}, headers), {'removed': True})
+        self.assertTrue(self.request('/api/projects/remove', {'id': ident}, headers)['removed'])
         reloaded = self.request('/api/state')['profile']
         self.assertEqual(reloaded['projects'], [])
         self.assertEqual(App(self.root).store.profile()['projects'], [])
@@ -105,7 +133,7 @@ class WebTests(unittest.TestCase):
         profile = self.app.store.profile()
         profile['projects'][0]['id'] = ' project-one '
         self.app.store.save_profile(profile)
-        self.assertEqual(self.app.post('/api/projects/remove', {'id': ' project-one '}), {'removed': True})
+        self.assertTrue(self.app.post('/api/projects/remove', {'id': ' project-one '})['removed'])
         self.assertEqual(self.app.store.profile()['projects'], [])
 
     def test_remove_unsaved_project_does_not_save_sample_profile(self):
