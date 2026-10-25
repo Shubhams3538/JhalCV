@@ -1,18 +1,359 @@
 <!doctype html>
 <html lang="en" data-theme="dark">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JhalCV — Your resume workspace</title><script src="/theme.js"></script><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JhalCV — Your resume workspace</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
 <body>
-<aside class="sidebar"><a class="brand" href="/">J<span>↗</span><b>JhalCV<small>YOUR NEXT CHAPTER</small></b></a><div class="nav-label">WORKSPACE</div><nav aria-label="Main navigation"><button class="nav active" data-view="workspace">◈ <span>Tailor resume</span></button><button class="nav" data-view="jobs">▤ <span>Jobs</span></button><button class="nav" data-view="profile">◎ <span>My profile</span></button><button class="nav" data-view="insights">◇ <span>Insights</span></button><button class="nav" data-view="usage">◷ <span>Usage</span></button><button class="nav" data-view="settings">⚙ <span>Settings</span></button></nav><div class="sidebar-note"><span class="dot"></span> Runs on your computer<p>Your profile stays here.<br>Your next opportunity is out there.</p></div></aside>
-<main><header><span>WORKSPACE <span class="muted">/</span> <span id="breadcrumb">Tailor resume</span></span><div class="header-actions"><button id="theme-toggle" class="theme-toggle" type="button" aria-label="Dark theme" aria-pressed="true" title="Switch to light theme">☾ Dark</button><span class="local-badge">● LOCAL WORKSPACE</span></div></header>
+
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="brand-mark">J</span><span class="brand-name">JhalCV<small>LOCAL EDITION</small></span></a>
+  <nav aria-label="Main navigation">
+    <button class="nav active" data-view="workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg><span>Tailor resume</span></button>
+    <button class="nav" data-view="jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Jobs</span></button>
+    <button class="nav" data-view="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span>My profile</span></button>
+    <button class="nav" data-view="insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20v-8"/><path d="M12 20V5"/><path d="M18 20v-5"/></svg><span>Insights</span></button>
+    <button class="nav" data-view="benchmarks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19a9 9 0 1 1 14 0"/><path d="M12 13l3.5-4.5"/></svg><span>Benchmarks</span></button>
+    <button class="nav" data-view="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Usage</span></button>
+    <button class="nav" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/><circle cx="9" cy="7" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="8" cy="17" r="1.6"/></svg><span>Settings</span></button>
+  </nav>
+  <div class="sidebar-note"><span class="dot"></span> Runs on your computer<p>Your profile stays here.<br>Your next opportunity is out there.</p></div>
+</aside>
+
+<main>
+<header class="topbar">
+  <span class="crumb">JhalCV <span class="sep">/</span> <span id="breadcrumb">Tailor resume</span></span>
+  <div class="topbar-actions">
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Theme" aria-pressed="true" title="Switch to light theme">☾ Dark</button>
+    <span class="local-badge">● LOCAL WORKSPACE</span>
+  </div>
+</header>
+
 <div id="notice" role="status" aria-live="polite" hidden></div>
-<section id="workspace" class="view"><div class="page-title"><div class="eyebrow">A LITTLE MORE YOU. A LITTLE MORE RELEVANT.</div><h1>Make your work<br><em>speak to the role.</em></h1><p>A focused resume, grounded in what you actually built.</p></div>
-<div class="workspace-grid"><div><article class="panel"><div class="panel-head"><span class="step">01</span><h2>The opportunity</h2><span class="pill">START HERE</span></div><label for="jd">Job description</label><textarea id="jd" rows="11" placeholder="Paste the job description here. We’ll find the overlap with your real experience — and leave the rest alone."></textarea><div class="field-footer"><span>Clear projects. Natural relevance. No invented claims.</span><span id="jd-count">0 words</span></div></article>
-<article class="panel"><div class="panel-head"><span class="step">02</span><h2>Your project library</h2><span id="project-count" class="pill">0 PROJECTS</span></div><p class="subtle">Choose the projects to consider. The best fit earns its place on the page.</p><div id="project-list"></div><div class="import-row"><label class="sr-only" for="github-url">GitHub repository URL</label><input id="github-url" placeholder="https://github.com/you/project" type="url"><button id="import-project" class="secondary">↗ Import GitHub</button></div><button id="manual-project" class="text-button">+ Add a project manually</button><div id="import-draft" hidden></div></article>
-<div class="action-bar"><div><strong>One page. Your actual work.</strong><small id="ai-status">Checking tailoring mode…</small></div><button id="tailor" class="primary">Create tailored draft <span>↗</span></button></div></div>
-<aside class="preview-column"><div class="preview-heading"><h2>Your next resume</h2><span class="pill">ONE PAGE</span></div><div id="empty-preview" class="paper-placeholder"><div class="paper-mark">J↗</div><h3>Good work deserves<br>a clear introduction.</h3><p>Add the opportunity and your projects.<br>Your tailored resume will appear here.</p><div class="skeleton"><i></i><i></i><i></i><i></i><i></i></div></div><div id="draft-preview" hidden></div><div class="principle"><span>✧</span><p><strong>Relevance without reinvention.</strong><br>Contact details, experience, and education stay fixed. Project wording stays concise.</p></div></aside></div></section>
-<section id="jobs" class="view" hidden><div class="page-title"><div class="eyebrow">YOUR SHORTLIST, COLLECTED</div><h1>Roles worth your time,<br><em>in one place.</em></h1><p>Add the careers pages you care about, with your filters applied. Eligible shows relevant jobs posted within seven days. Unapplied jobs move to Old after seven days and are deleted once their posting age exceeds eight days. Applied jobs stay until you delete them.</p></div><div class="jobs-grid"><div><article class="panel"><div class="panel-head"><span class="step">01</span><h2>Career pages</h2><span id="jobs-source-count" class="pill">0 SOURCES</span></div><form id="jobs-source-form" autocomplete="off"><div class="form-grid"><div><label for="jobs-company">Company</label><input id="jobs-company" maxlength="100" required placeholder="Google"></div><div><label for="jobs-url">Careers URL, with your filters</label><input id="jobs-url" type="url" required placeholder="https://www.google.com/about/careers/applications/jobs/results/?q=…"></div><div><label for="jobs-include">Title must include (optional)</label><input id="jobs-include" maxlength="500" placeholder="engineer, developer"></div><div><label for="jobs-exclude">Title must not include (optional)</label><input id="jobs-exclude" maxlength="500" placeholder="senior, staff, manager"></div><div><label for="jobs-locations">Locations to keep (optional)</label><input id="jobs-locations" maxlength="500" placeholder="India, Remote"></div></div><p class="hint">Google, Amazon, Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Oracle and Jibe feeds are read directly. Any other careers page is read by Codex or Claude Code from the first page of results.</p><button class="secondary" type="submit">Add careers page</button></form><div class="csv-import-tools"><label class="secondary csv-upload" for="jobs-csv">Import companies CSV<input id="jobs-csv" type="file" accept=".csv,text/csv" class="sr-only"></label><p class="hint">Two columns: company,url. Preview before adding; duplicates are skipped.</p></div><div id="jobs-sources"></div></article><article class="panel"><div class="panel-head"><span class="step">02</span><h2>Your experience</h2></div><form id="jobs-experience-form" class="experience-row"><label for="jobs-years">Years of professional experience</label><input id="jobs-years" type="number" min="0" max="50" step="0.1" required><button class="secondary" type="submit">Save &amp; recheck</button><button id="jobs-years-reset" class="text-button" type="button">Use profile dates</button></form><p id="jobs-years-hint" class="hint"></p></article></div><div><article class="panel"><div class="panel-head"><span class="step">03</span><h2>Jobs</h2><span id="jobs-count" class="pill">0 JOBS</span></div><div class="jobs-toolbar"><button id="jobs-refresh" class="primary" type="button">Refresh all ↻</button><button id="jobs-review-all" class="secondary" type="button">Review unreviewed jobs</button><button id="jobs-refresh-selected" class="secondary" type="button" disabled>Refresh selected</button><span id="jobs-progress" class="hint" role="status" aria-live="polite"></span></div><div class="jobs-category-tools"><div id="jobs-tabs" class="jobs-tabs" role="tablist"></div><button class="text-button" type="button" data-delete-jobs="">Delete all in this tab</button></div><label class="sr-only" for="jobs-search">Search jobs</label><input id="jobs-search" type="search" placeholder="Search title, company or location"><div id="jobs-list"></div><details class="jobs-drawer" id="jobs-review"><summary>Needs review <span id="jobs-review-count" class="pill">0</span></summary><p class="hint">Missing or uncertain dates, pending checks, and uncertain matches. These do not appear in Eligible.</p><button class="text-button" type="button" data-delete-jobs="review">Delete all needing review</button><div id="jobs-review-list"></div></details><details class="jobs-drawer" id="jobs-old"><summary>Old <span id="jobs-old-count" class="pill">0</span></summary><p class="hint">Unapplied jobs more than seven days old. Removed automatically once posting age exceeds eight days, when you next open or refresh Jobs.</p><button class="text-button" type="button" data-delete-jobs="old">Delete all old jobs</button><div id="jobs-old-list"></div></details></article></div></div></section><section id="profile" class="view" hidden><div class="page-title"><div class="eyebrow">THE SOURCE OF TRUTH</div><h1>Your experience,<br><em>in your words.</em></h1><p>Edit once. Reuse for every opportunity.</p></div><form id="profile-form"><div id="profile-fields"></div><div class="action-bar"><p>These details are saved only on this computer.</p><button class="primary" type="submit">Save profile ↗</button></div></form></section>
-<section id="insights" class="view" hidden><div class="page-title"><div class="eyebrow">WHAT THE ROLES ASK FOR</div><h1>See the gaps,<br><em>close them your way.</em></h1><p>Built from every job description you tailor a resume for.</p></div><article class="panel"><div class="panel-head"><span class="step">01</span><h2>Skills you are missing</h2><span class="pill">TOP 10</span></div><p class="subtle" id="insights-summary"></p><div id="insights-missing"></div></article><article class="panel"><div class="panel-head"><span class="step">02</span><h2>Most requested skills</h2><span class="pill">TOP 10</span></div><p class="subtle">Share of analyzed jobs that asked for each skill, whether or not you have it.</p><div id="insights-asked"></div></article><div class="insights-actions"><button id="insights-unhide" class="text-button" hidden>Show hidden skills</button><button id="insights-reset" class="text-button">Reset insights</button></div></section><section id="usage" class="view" hidden><div class="page-title"><div class="eyebrow">YOUR AI ACTIVITY</div><h1>Every token,<br><em>accounted for.</em></h1><p>Local totals for resume tailoring and job filtering. Tracking starts with this update; earlier activity cannot be recovered.</p></div><article class="panel"><div class="panel-head"><h2>Usage overview</h2><button id="usage-refresh" class="secondary" type="button">Refresh</button></div><p id="usage-period" class="hint"></p><div id="usage-metrics" class="usage-grid"></div><p id="usage-warning" class="warning" hidden></p><p class="hint">Dollar values are estimates at standard text API rates, except provider-reported OpenRouter charges. Subscription equivalent is a comparison value for Codex/Claude Code, not an extra subscription bill. Credits, free tiers, taxes and subscription fees are excluded. Cached input is already included in input tokens.</p></article><article class="panel"><div class="panel-head"><h2>By provider and model</h2></div><div id="usage-models"></div></article><article class="panel"><h2>Pricing assumptions</h2><form id="usage-reference-form"><label for="usage-reference">Codex valuation model</label><select id="usage-reference"></select><p class="hint">Codex reports token counts without its model name. This reference only values future usage; it does not change the model Codex runs. Existing estimates stay fixed. Cache writes assume the default cache lifetime.</p><button class="secondary" type="submit">Save valuation model</button></form><p id="usage-rates" class="hint"></p><div id="usage-sources" class="usage-sources"></div></article></section>
-<section id="settings" class="view" hidden><div class="page-title"><div class="eyebrow">MAKE YOURSELF AT HOME</div><h1>A workspace<br><em>that fits you.</em></h1><p>AI providers, where your resume is saved, and how it is tailored.</p></div><div class="settings-grid"><article class="panel settings-panel api-panel" id="api-panel"><div class="panel-head"><span class="step">AI</span><h2>Providers &amp; API keys</h2><span class="pill">LOCAL ONLY</span></div><p class="subtle">Add multiple keys. If a key fails, JhalCV automatically tries another configured key or provider, then falls back to rules.</p><div id="api-key-list"></div><form id="api-key-form" autocomplete="off"><div class="form-grid"><div><label for="api-provider">Provider</label><select id="api-provider" required></select></div><div><label for="api-key-label">Label (optional)</label><input id="api-key-label" maxlength="80" placeholder="Personal, work, backup…"></div><div class="wide"><label for="api-key-model">Model</label><select id="api-key-model" required></select><div id="api-custom-model-field" hidden><label for="api-custom-model">Custom model ID</label><input id="api-custom-model" maxlength="150" spellcheck="false" placeholder="Enter a model ID from your provider"></div><p class="hint">A default is selected for you. Choose another model if you prefer; availability depends on your account.</p></div><div class="wide"><label for="api-key-secret">New API key</label><input id="api-key-secret" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="none" maxlength="1024" required placeholder="Paste a new key"><p class="hint">Saved keys are never returned to this page. Every entry uses the same dummy mask. The input is cleared on submission. Keys are stored in a private local file; they are not encrypted at rest.</p></div></div><button class="primary" type="submit">Add API key ↗</button></form><label class="reminder-toggle"><input id="api-reminder-enabled" type="checkbox"><span>Remind me on startup when no API keys are configured</span></label><p class="hint">Environment keys can be ignored here without changing the environment file. Automatic failover may send your job description and relevant project/profile content to another configured provider.</p></article><form id="settings-form" class="panel settings-panel output-panel"><div class="panel-head"><span class="step">PDF</span><h2>Resume output</h2><span class="pill">THIS COMPUTER</span></div><label for="output-dir">Destination folder</label><div class="folder-picker"><input id="output-dir" required placeholder="/Users/you/Documents/Resumes"><button id="choose-folder" class="secondary" type="button">Choose folder…</button></div><p class="hint">Choose a folder or enter a path, then save settings. The latest resume stays here; previous versions go into Archive. Sort by Date modified (newest first) when picking a file.</p><label for="filename">File name</label><div class="suffix-field"><input id="filename" required><span>.pdf</span></div><label for="tailoring-mode">Tailoring mode</label><select id="tailoring-mode"><option value="auto">AI when available, otherwise rules</option><option value="rules">Rules only — no AI requests</option></select><input id="model" type="hidden"><div id="dependencies"></div><button class="primary" type="submit">Save settings ↗</button></form></div></section>
-<footer>BUILT FROM YOUR EXPERIENCE. SHAPED FOR YOUR NEXT STEP.<span>JhalCV / LOCAL EDITION</span></footer></main>
-<dialog id="jobs-import-dialog" aria-labelledby="jobs-import-title"><h2 id="jobs-import-title">Import career pages</h2><p id="jobs-import-summary" class="hint"></p><label for="jobs-import-locations">Locations to keep for these companies</label><input id="jobs-import-locations" maxlength="500" value="India" placeholder="India"><p class="hint">India is applied in JhalCV even when the portal URL has no location filter. Importing does not start a refresh.</p><div id="jobs-import-rows"></div><div class="dialog-actions"><button id="jobs-import-confirm" class="primary" type="button">Import companies</button><button id="jobs-import-cancel" class="secondary" type="button">Cancel</button></div></dialog><dialog id="api-key-reminder" aria-labelledby="api-reminder-title"><div class="dialog-symbol">✧</div><div class="eyebrow">YOUR LOCAL WORKSPACE</div><h2 id="api-reminder-title">Want a little help<br>with the wording?</h2><p>No API key is configured. Add a provider key for AI-assisted project descriptions, or keep using the app with rules and your original wording.</p><p id="api-reminder-error" class="warning" role="alert" hidden></p><div class="dialog-actions"><button id="reminder-add-key" class="primary" type="button">Add an API key ↗</button><button id="reminder-later" class="secondary" type="button">Not now</button></div><button id="reminder-never" class="text-button" type="button">I will never add an API key</button><small>You can change this choice later in Settings.</small></dialog>
-</body></html>
+
+<section id="workspace" class="view">
+  <div id="tailor-job-context" class="panel tailor-job-context" hidden>
+    <div>
+      <small>FROM YOUR JOB SHORTLIST</small>
+      <strong id="tailor-job-title"></strong>
+      <a id="tailor-job-link" target="_blank" rel="noopener noreferrer">Open job posting ↗</a>
+    </div>
+    <button id="back-to-job" class="secondary" type="button">← Back to this job</button>
+  </div>
+  <div class="page-title">
+    <div class="eyebrow">A LITTLE MORE YOU. A LITTLE MORE RELEVANT.</div>
+    <h1>Make your work<br><em>speak to the role.</em></h1>
+    <p>A focused resume, grounded in what you actually built.</p>
+  </div>
+  <div class="workspace-grid">
+    <div>
+      <article class="panel">
+        <div class="panel-head"><span class="step">01</span><h2>The opportunity</h2><span class="pill">START HERE</span></div>
+        <label for="jd">Job description</label>
+        <textarea id="jd" rows="11" placeholder="Paste the job description here. We’ll find the overlap with your real experience — and leave the rest alone."></textarea>
+        <div class="field-footer"><span>Clear projects. Natural relevance. No invented claims.</span><span id="jd-count">0 words</span></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><span class="step">02</span><h2>Your project library</h2><span id="project-count" class="pill">0 PROJECTS</span></div>
+        <p class="subtle">Choose the projects to consider. The best fit earns its place on the page.</p>
+        <div id="project-list"></div>
+        <div class="import-row">
+          <label class="sr-only" for="github-url">GitHub repository URL</label>
+          <input id="github-url" placeholder="https://github.com/you/project" type="url">
+          <button id="import-project" class="secondary">↗ Import GitHub</button>
+        </div>
+        <button id="manual-project" class="text-button">+ Add a project manually</button>
+        <div id="import-draft" hidden></div>
+      </article>
+      <div class="action-bar">
+        <div><strong>One page. Your actual work.</strong><small id="ai-status">Checking tailoring mode…</small></div>
+        <button id="tailor" class="primary">Create tailored draft <span>↗</span></button>
+      </div>
+    </div>
+    <aside class="preview-column">
+      <div class="preview-heading"><h2>Your next resume</h2><span class="pill">ONE PAGE</span></div>
+      <div id="empty-preview" class="paper-placeholder">
+        <div class="paper-mark">J</div>
+        <h3>Good work deserves<br>a clear introduction.</h3>
+        <p>Add the opportunity and your projects.<br>Your tailored resume will appear here.</p>
+        <div class="skeleton"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div id="draft-preview" hidden></div>
+      <div class="principle"><span>●</span><p><strong>Relevance without reinvention.</strong><br>Contact details, experience, and education stay fixed. Project wording stays concise.</p></div>
+    </aside>
+  </div>
+</section>
+
+<section id="jobs" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">YOUR SHORTLIST, COLLECTED</div>
+    <h1>Roles worth your time,<br><em>in one place.</em></h1>
+    <p>Companies you follow feed this shortlist — Eligible collects relevant jobs posted within seven days. Unapplied jobs move to Old after seven days and are removed by day eight. Applied jobs stay until you delete them.</p>
+  </div>
+  <div class="jobs-switch" role="group" aria-label="Jobs sections">
+    <button class="seg-btn active" type="button" data-pane="board" aria-pressed="true">Shortlist</button>
+    <button class="seg-btn" type="button" data-pane="companies" aria-pressed="false">Companies</button>
+  </div>
+  <div id="jobs-board" class="jobs-pane">
+    <article class="panel">
+      <div class="panel-head"><h2>Jobs</h2><span id="jobs-count" class="pill">0 JOBS</span></div>
+      <div class="jobs-toolbar">
+        <div class="jobs-toolbar-actions">
+          <button id="jobs-refresh" class="primary" type="button">Refresh all ↻</button>
+          <button id="jobs-review-all" class="secondary" type="button">Review unreviewed jobs</button>
+          <button id="jobs-refresh-selected" class="secondary" type="button" disabled>Refresh selected</button>
+          <details class="exp-popover" id="exp-popover">
+            <summary class="exp-pill" id="experience-pill" title="Years of professional experience used for eligibility checks">Experience · — yrs</summary>
+            <div class="exp-card">
+              <form id="jobs-experience-form" class="experience-row">
+                <label for="jobs-years">Years of professional experience</label>
+                <input id="jobs-years" type="number" min="0" max="50" step="0.1" required>
+                <button class="secondary" type="submit">Save &amp; recheck</button>
+                <button id="jobs-years-reset" class="text-button" type="button">Use profile dates</button>
+              </form>
+              <p id="jobs-years-hint" class="hint"></p>
+            </div>
+          </details>
+        </div>
+        <span id="jobs-progress" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <div class="jobs-category-tools">
+        <div id="jobs-tabs" class="jobs-tabs" role="tablist"></div>
+        <button class="text-button" type="button" data-delete-jobs="">Delete all in this tab</button>
+      </div>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <label class="sr-only" for="jobs-search">Search jobs</label>
+        <input id="jobs-search" type="search" placeholder="Search title, company or location">
+      </div>
+      <div id="jobs-list"></div>
+      <details class="jobs-drawer" id="jobs-review">
+        <summary>Needs review <span id="jobs-review-count" class="pill">0</span></summary>
+        <p class="hint">Missing or uncertain dates, pending checks, and uncertain matches. These do not appear in Eligible.</p>
+        <button class="text-button" type="button" data-delete-jobs="review">Delete all needing review</button>
+        <div id="jobs-review-list"></div>
+      </details>
+      <details class="jobs-drawer" id="jobs-old">
+        <summary>Old <span id="jobs-old-count" class="pill">0</span></summary>
+        <p class="hint">Unapplied jobs more than seven days old. Removed automatically once posting age exceeds eight days, when you next open or refresh Jobs.</p>
+        <button class="text-button" type="button" data-delete-jobs="old">Delete all old jobs</button>
+        <div id="jobs-old-list"></div>
+      </details>
+    </article>
+  </div>
+  <div id="jobs-companies" class="jobs-pane" hidden>
+    <div class="companies-toolbar">
+      <span id="jobs-source-count" class="pill">0 COMPANIES</span>
+      <details class="add-company" id="add-company">
+        <summary class="secondary">＋ Add company</summary>
+        <form id="jobs-source-form" autocomplete="off">
+          <div class="form-grid">
+            <div><label for="jobs-company">Company</label><input id="jobs-company" maxlength="100" required placeholder="Google"></div>
+            <div><label for="jobs-url">Careers URL, with your filters</label><input id="jobs-url" type="url" required placeholder="https://www.google.com/about/careers/applications/jobs/results/?q=…"></div>
+          </div>
+          <details class="filter-options">
+            <summary>Optional filters</summary>
+            <div class="form-grid">
+              <div><label for="jobs-include">Title must include</label><input id="jobs-include" maxlength="500" placeholder="engineer, developer"></div>
+              <div><label for="jobs-exclude">Title must not include</label><input id="jobs-exclude" maxlength="500" placeholder="senior, staff, manager"></div>
+              <div class="wide"><label for="jobs-locations">Locations to keep</label><input id="jobs-locations" maxlength="500" placeholder="India, Remote"></div>
+            </div>
+            <p class="hint">Google, Amazon, Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Oracle, Jibe and Nutanix feeds are read directly. Any other careers page is read by Codex or Claude Code from the first page of results.</p>
+          </details>
+          <button class="secondary" type="submit">Add company</button>
+        </form>
+      </details>
+      <label class="secondary csv-upload" for="jobs-csv" title="Two columns: company,url — previewed before adding; duplicates are skipped.">Import CSV<input id="jobs-csv" type="file" accept=".csv,text/csv" class="sr-only"></label>
+    </div>
+    <div id="jobs-sources"></div>
+  </div>
+</section>
+
+<section id="profile" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">THE SOURCE OF TRUTH</div>
+    <h1>Your experience,<br><em>in your words.</em></h1>
+    <p>Edit once. Reuse for every opportunity.</p>
+  </div>
+  <form id="profile-form">
+    <div id="profile-fields"></div>
+    <div class="action-bar">
+      <p>These details are saved only on this computer.</p>
+      <button class="primary" type="submit">Save profile ↗</button>
+    </div>
+  </form>
+</section>
+
+<section id="insights" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">WHAT THE ROLES ASK FOR</div>
+    <h1>See the gaps,<br><em>close them your way.</em></h1>
+    <p>Built from every job description you tailor a resume for.</p>
+  </div>
+  <article class="panel">
+    <div class="panel-head"><span class="step">01</span><h2>Skills you are missing</h2><span class="pill">TOP 10</span></div>
+    <p class="subtle" id="insights-summary"></p>
+    <div id="insights-missing"></div>
+  </article>
+  <article class="panel">
+    <div class="panel-head"><span class="step">02</span><h2>Most requested skills</h2><span class="pill">TOP 10</span></div>
+    <p class="subtle">Share of analyzed jobs that asked for each skill, whether or not you have it.</p>
+    <div id="insights-asked"></div>
+  </article>
+  <div class="insights-actions">
+    <button id="insights-unhide" class="text-button" hidden>Show hidden skills</button>
+    <button id="insights-reset" class="text-button">Reset insights</button>
+  </div>
+</section>
+
+<section id="benchmarks" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">MEASURE THE REAL WORK</div>
+    <h1>Where the<br><em>time goes.</em></h1>
+    <p>Refresh jobs or review saved jobs to record a live timing report. Reports stay on this computer and contain counters and company names, never job descriptions, prompts or API keys.</p>
+  </div>
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Run timings</h2>
+      <button id="benchmarks-refresh" class="secondary" type="button">Refresh report</button>
+      <button id="benchmarks-download" class="secondary" type="button" disabled>Download JSON</button>
+    </div>
+    <label for="benchmark-run">Run</label>
+    <select id="benchmark-run"></select>
+    <p id="benchmark-status" class="hint"></p>
+    <p id="benchmark-warning" class="warning" hidden></p>
+    <p class="hint">Elapsed time is real wall-clock duration. Stage times accumulate across concurrent work; listing, detail, eligibility and company timers include child stages. Do not add these values together or treat them as percentages of elapsed time. Active calls appear in stage totals when they finish. Company times cover collection; shared eligibility batches are reported separately.</p>
+    <div id="benchmark-stages" class="benchmark-table"></div>
+  </article>
+  <article class="panel">
+    <h2>Slowest companies</h2>
+    <div id="benchmark-companies" class="benchmark-table"></div>
+  </article>
+</section>
+
+<section id="usage" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">YOUR AI ACTIVITY</div>
+    <h1>Every token,<br><em>accounted for.</em></h1>
+    <p>Local totals for resume tailoring and job filtering. Tracking starts with this update; earlier activity cannot be recovered.</p>
+  </div>
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Usage overview</h2>
+      <button id="usage-refresh" class="secondary" type="button">Refresh</button>
+    </div>
+    <p id="usage-period" class="hint"></p>
+    <div id="usage-metrics" class="usage-grid"></div>
+    <p id="usage-warning" class="warning" hidden></p>
+    <p class="hint">Dollar values are estimates at standard text API rates, except provider-reported OpenRouter charges. Subscription equivalent is a comparison value for Codex/Claude Code, not an extra subscription bill. Credits, free tiers, taxes and subscription fees are excluded. Cached input is already included in input tokens.</p>
+  </article>
+  <article class="panel">
+    <div class="panel-head"><h2>By provider and model</h2></div>
+    <div id="usage-models"></div>
+  </article>
+  <article class="panel">
+    <h2>Pricing assumptions</h2>
+    <form id="usage-reference-form">
+      <label for="usage-reference">Codex valuation model</label>
+      <select id="usage-reference"></select>
+      <p class="hint">Codex reports token counts without its model name. This reference only values future usage; it does not change the model Codex runs. Existing estimates stay fixed. Cache writes assume the default cache lifetime.</p>
+      <button class="secondary" type="submit">Save valuation model</button>
+    </form>
+    <p id="usage-rates" class="hint"></p>
+    <div id="usage-sources" class="usage-sources"></div>
+  </article>
+</section>
+
+<section id="settings" class="view" hidden>
+  <div class="page-title">
+    <div class="eyebrow">MAKE YOURSELF AT HOME</div>
+    <h1>A workspace<br><em>that fits you.</em></h1>
+    <p>AI providers, where your resume is saved, and how it is tailored.</p>
+  </div>
+  <div class="settings-grid">
+    <article class="panel settings-panel api-panel" id="api-panel">
+      <div class="panel-head"><span class="step">AI</span><h2>Providers &amp; API keys</h2><span class="pill">LOCAL ONLY</span></div>
+      <p class="subtle">Add multiple keys. If a key fails, JhalCV automatically tries another configured key or provider, then falls back to rules.</p>
+      <div id="api-key-list"></div>
+      <form id="api-key-form" autocomplete="off">
+        <div class="form-grid">
+          <div><label for="api-provider">Provider</label><select id="api-provider" required></select></div>
+          <div><label for="api-key-label">Label (optional)</label><input id="api-key-label" maxlength="80" placeholder="Personal, work, backup…"></div>
+          <div class="wide">
+            <label for="api-key-model">Model</label>
+            <select id="api-key-model" required></select>
+            <div id="api-custom-model-field" hidden>
+              <label for="api-custom-model">Custom model ID</label>
+              <input id="api-custom-model" maxlength="150" spellcheck="false" placeholder="Enter a model ID from your provider">
+            </div>
+            <p class="hint">A default is selected for you. Choose another model if you prefer; availability depends on your account.</p>
+          </div>
+          <div class="wide">
+            <label for="api-key-secret">New API key</label>
+            <input id="api-key-secret" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="none" maxlength="1024" required placeholder="Paste a new key">
+            <p class="hint">Saved keys are never returned to this page. Every entry uses the same dummy mask. The input is cleared on submission. Keys are stored in a private local file; they are not encrypted at rest.</p>
+          </div>
+        </div>
+        <button class="primary" type="submit">Add API key ↗</button>
+      </form>
+      <label class="reminder-toggle"><input id="api-reminder-enabled" type="checkbox"><span>Remind me on startup when no API keys are configured</span></label>
+      <p class="hint">Environment keys can be ignored here without changing the environment file. Automatic failover may send your job description and relevant project/profile content to another configured provider.</p>
+    </article>
+    <form id="settings-form" class="panel settings-panel output-panel">
+      <div class="panel-head"><span class="step">PDF</span><h2>Resume output</h2><span class="pill">THIS COMPUTER</span></div>
+      <label for="output-dir">Destination folder</label>
+      <div class="folder-picker">
+        <input id="output-dir" required placeholder="/Users/you/Documents/Resumes">
+        <button id="choose-folder" class="secondary" type="button">Choose folder…</button>
+      </div>
+      <p class="hint">Choose a folder or enter a path, then save settings. The latest resume stays here; previous versions go into Archive. Sort by Date modified (newest first) when picking a file.</p>
+      <label for="filename">File name</label>
+      <div class="suffix-field"><input id="filename" required><span>.pdf</span></div>
+      <label for="tailoring-mode">Tailoring mode</label>
+      <select id="tailoring-mode">
+        <option value="auto">AI when available, otherwise rules</option>
+        <option value="rules">Rules only — no AI requests</option>
+      </select>
+      <input id="model" type="hidden">
+      <div id="dependencies"></div>
+      <button class="primary" type="submit">Save settings ↗</button>
+    </form>
+  </div>
+</section>
+
+<footer>BUILT FROM YOUR EXPERIENCE. SHAPED FOR YOUR NEXT STEP.<span>JhalCV / LOCAL EDITION</span></footer>
+</main>
+
+<dialog id="jobs-import-dialog" aria-labelledby="jobs-import-title">
+  <h2 id="jobs-import-title">Import career pages</h2>
+  <p id="jobs-import-summary" class="hint"></p>
+  <label for="jobs-import-locations">Locations to keep for these companies</label>
+  <input id="jobs-import-locations" maxlength="500" value="India" placeholder="India">
+  <p class="hint">India is applied in JhalCV even when the portal URL has no location filter. Importing does not start a refresh.</p>
+  <div id="jobs-import-rows"></div>
+  <div class="dialog-actions">
+    <button id="jobs-import-confirm" class="primary" type="button">Import companies</button>
+    <button id="jobs-import-cancel" class="secondary" type="button">Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="api-key-reminder" aria-labelledby="api-reminder-title">
+  <div class="dialog-symbol">J</div>
+  <div class="eyebrow">YOUR LOCAL WORKSPACE</div>
+  <h2 id="api-reminder-title">Want a little help<br>with the wording?</h2>
+  <p>No API key is configured. Add a provider key for AI-assisted project descriptions, or keep using the app with rules and your original wording.</p>
+  <p id="api-reminder-error" class="warning" role="alert" hidden></p>
+  <div class="dialog-actions">
+    <button id="reminder-add-key" class="primary" type="button">Add an API key ↗</button>
+    <button id="reminder-later" class="secondary" type="button">Not now</button>
+  </div>
+  <button id="reminder-never" class="text-button" type="button">I will never add an API key</button>
+  <small>You can change this choice later in Settings.</small>
+</dialog>
+
+</body>
+</html>
