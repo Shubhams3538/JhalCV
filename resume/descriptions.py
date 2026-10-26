@@ -10,6 +10,7 @@ from . import llm
 from .tailor import ANGLE_KEYWORDS
 
 WORDS = re.compile(r'\S+')
+BOLD = re.compile(r'\*\*(.+?)\*\*')
 NUMBERS = re.compile(r'\d+(?:[.,]\d+)*(?:%|x|ms|s|k|K|M)?')
 
 
@@ -111,7 +112,8 @@ def rewrite_projects(data, jd, settings):
                 'Do not force keywords, copy requirements, invent features, numbers, technologies, scale, ownership or outcomes. '
                 'Prefer the original if it is already clear. Return projects and bullets in exactly the supplied order and count. '
                 'Every rewritten bullet must be no longer than its own original in BOTH characters and whitespace-delimited words. '
-                'No new numbers, Markdown, newlines or links. Explain actual work, do not turn every project into the advertised role.'))
+                'Keep every **bold** phrase exactly as written, with its ** markers, in the same order. '
+                'No new numbers, other Markdown, newlines or links. Explain actual work, do not turn every project into the advertised role.'))
         projects = raw['projects']
         if not isinstance(projects, list) or len(projects) != len(data['projects']):
             raise ValueError('Wrong project count.')
@@ -121,7 +123,8 @@ def rewrite_projects(data, jd, settings):
             if not isinstance(bullets, list) or len(bullets) != len(source['bullets']):
                 raise ValueError('Wrong bullet count.')
             for i, (old, new) in enumerate(zip(source['bullets'], bullets)):
-                if within(new, old):
+                # Bold phrases are the user's own emphasis: the AI may not drop or move them.
+                if within(new, old) and BOLD.findall(new) == BOLD.findall(old) and new.count('**') == old.count('**'):
                     dest['bullets'][i] = new.strip()
                 else:
                     rejected += 1

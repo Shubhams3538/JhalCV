@@ -13,16 +13,25 @@ The user wants implementation without code walkthroughs. Read `AGENTS.local.md`;
 ## Changes in the accompanying commit
 
 - Native saving-folder chooser, with manual path fallback. The folder contains one current `shubham_Resume.pdf`; previous copies go into `Archive`. Saving uses a per-folder lock and atomic replacement.
-- Success notices disappear after five seconds; errors remain visible.
+- Success notices disappear after five seconds, errors after eight; clicking any notice dismisses it.
 - Settings support multiple OpenAI, Gemini, Anthropic, and OpenRouter keys, a preferred key, and automatic failover. The startup reminder offers a permanent opt-out.
 - Model selectors show readable provider-specific choices and a selected default, plus an Other model option. Existing saved keys have a Change model editor; changing a model does not require re-entering its key. Existing models are preserved.
 - Saved credentials stay on the local backend. Browser responses contain fixed dummy masks only, never a key or its prefix. Provider failures and generated output are checked to prevent secret leakage into reports or caches.
+
+## Changes on October 26, 2026
+
+- Checked projects are the only ones sent to the AI. When the checked count fits the page cap, every checked project is shown; the model is asked for exactly that many and omitted ones are backfilled.
+- Insights (nav item above Settings): each draft records the skills its JD asked for in `.local/insights.json` (one record per JD, canonical names so C++/cpp and k8s/Kubernetes merge). Shows top 10 missing skills (checked against the whole profile) and top 10 requested skills, with Add to skills, Hide, and Reset. Recommendations are deferred by the user.
+- Skill groups print at most 9 items (`MAX_SKILLS_PER_GROUP`, hardcoded for now), most job-relevant first.
+- `**phrase**` in bullets renders bold. AI rewrites must keep bold phrases unchanged or the original bullet is kept.
+- Heading rows (company/city, role/dates, project/GitHub) render as one text line, so parsers no longer attach a city or link to the previous entry.
+- Unexpected server errors print a traceback to the terminal; the browser still gets the generic message. The user reported that message once; the cause is not yet identified.
 
 ## Private data and validation
 
 Do not overwrite the user's profile or environment file, or print credentials. `profile.json`, `.local/`, `.cache/`, and `build/` are ignored. Credentials are stored with mode 0600 in `.local/credentials.json`; they are not encrypted at rest.
 
-Validation: 56 unit tests passed; JS syntax, Python compilation, and diff checks passed. Isolated browser checks covered model selection, saved-model updates, dummy-only credential state, reminder choices, and disappearing notices. A live OpenAI call succeeded with the new default `gpt-5.4-mini`. Other providers were tested with transport fixtures, not live accounts. Windows/Linux native folder dialogs have not been verified on those operating systems.
+Validation (October 25): 56 unit tests passed; JS syntax, Python compilation, and diff checks passed. Isolated browser checks covered model selection, saved-model updates, dummy-only credential state, reminder choices, and disappearing notices. A live OpenAI call succeeded with the new default `gpt-5.4-mini`. Other providers were tested with transport fixtures, not live accounts. Windows/Linux native folder dialogs have not been verified on those operating systems.
 
 Run the suite with `python3 -m unittest discover -s tests -v`.
 

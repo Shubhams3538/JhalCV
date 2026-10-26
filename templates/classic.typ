@@ -56,15 +56,27 @@
   )
 ]
 
+// `**phrase**` in a bullet renders that phrase bold. Text stays a plain string
+// otherwise, so nothing else in profile data is ever treated as markup.
+// Unbalanced markers render the bullet exactly as written.
+#let bold-spans(b) = {
+  let parts = b.split("**")
+  if calc.even(parts.len()) { return [#b] }
+  for (i, part) in parts.enumerate() {
+    if calc.odd(i) { text(weight: "bold")[#part] } else { [#part] }
+  }
+}
+
 #let bullets(items) = block(above: 5pt, below: 0pt)[
   #set list(indent: 4pt, body-indent: 6pt, tight: false, spacing: bullet-gap,
             marker: text(size: body-size)[•])
-  #list(..items.map(b => [#b]))
+  #list(..items.map(b => bold-spans(b)))
 ]
 
-#let two-col(l, r) = grid(
-  columns: (1fr, auto), align: (left, right), column-gutter: 10pt, l, r,
-)
+// One line of text, not a grid: a grid puts the right side in its own text
+// block, which parsers read out of order (a job's city ended up attached to
+// the previous job's bullets).
+#let two-col(l, r) = block(width: 100%, below: 0pt)[#l#h(1fr)#r]
 
 // `gap` is passed in so the first entry after a section rule sits closer than
 // entries sit to each other.

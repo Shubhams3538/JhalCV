@@ -13,7 +13,7 @@ import re
 
 from . import llm
 from .tailor import (ANGLE_KEYWORDS, parse_jd as parse_jd_rules,
-                     tailor as tailor_rules, renderable, project_cap,
+                     tailor as tailor_rules, renderable, project_cap, MAX_SKILLS_PER_GROUP,
                      _score_bullet, _score_project)
 
 # The closed angle enum. Kept in sync with the rule-based vocabulary by deriving
@@ -238,8 +238,9 @@ def _catalog(profile: dict, max_projects: int, bullets_per_project: int) -> str:
         lines.append(f"    angles available: {', '.join(p.get('angles', []))}")
         for b in p["bullets"]:
             lines.append(f"    [{b['id']}] ({'/'.join(b.get('angles', []))}) {b['text']}")
-    lines.append("\nSKILL GROUPS — reorder within each group. "
-                 "Return every item, none added, none dropped.")
+    lines.append("\nSKILL GROUPS — reorder within each group, most relevant to this job first. "
+                 "Return every item, none added, none dropped. "
+                 f"Only the first {MAX_SKILLS_PER_GROUP} of each group are printed.")
     for label, items in profile["skills"].items():
         if not label.startswith("_") and isinstance(items, list):
             lines.append(f"  {label}: {', '.join(items)}")
@@ -384,7 +385,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
         missing = [i for i in items if i not in used]
         if missing:
             problems.append(f"{label}: appended {len(missing)} item(s) the model omitted")
-        skills.append({"label": label, "items": ordered + missing})
+        skills.append({"label": label, "items": (ordered + missing)[:MAX_SKILLS_PER_GROUP]})
 
     return {"projects": chosen, "skills": skills}, problems
 
@@ -443,6 +444,7 @@ def tailor_llm(profile: dict, jd_text: str, *, max_projects: int = 2,
     report["tailorer"] = "llm"
     report["angle_scores"] = analysis["angle_scores"]
     report["gap_skills"] = analysis["gap_skills"]
+    report["matched_skills"] = analysis["matched_skills"]
     report["llm"] = {
         "used": True,
         "model": model or JD_MODEL,
