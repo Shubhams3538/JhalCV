@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ..usage import record_agent, usage_scope
 from ..llm import strictify
 from ..provider_api import validate_output
 from ..llm import LLMError
@@ -41,10 +42,13 @@ def _run(cmd, prompt, cwd):
     try:
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=cwd,
                               env=_env(), timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        record_agent(cmd[0], e.stdout)
         raise AgentError('timed out') from None
     except OSError as e:
+        record_agent(cmd[0], '')
         raise AgentError(f'could not start ({e.strerror})') from None
+    record_agent(cmd[0], proc.stdout)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or '').strip().splitlines()
         raise AgentError(detail[-1][:200] if detail else f'exit code {proc.returncode}')
@@ -54,7 +58,7 @@ def _run(cmd, prompt, cwd):
 def _codex(prompt: str, schema: dict, folder: Path):
     schema_path, out_path = folder / 'schema.json', folder / 'answer.json'
     schema_path.write_text(json.dumps(schema))
-    _run(['codex', 'exec', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '--ignore-rules',
+    _run(['codex', 'exec', '--json', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '--ignore-rules',
           '--sandbox', 'read-only', '-C', str(folder), '--output-schema', str(schema_path),
           '-o', str(out_path), '-'], prompt, folder)
     try:
@@ -82,7 +86,8 @@ RUNNERS = {'codex': _codex, 'claude': _claude}
 class Agents:
     """One per refresh: remembers which agents already failed in this run."""
 
-    def __init__(self, order=ORDER):
+    def __init__(self, order=ORDER, *, usage_store=None):
+        self.usage_store = usage_store
         self.order = [name for name in order if shutil.which(name)]
         self.failed: dict[str, str] = {}
         self.used: list[str] = []
@@ -94,7 +99,8 @@ class Agents:
                 continue
             with tempfile.TemporaryDirectory(prefix='jhalcv-agent-') as tmp:
                 try:
-                    answer = RUNNERS[name](prompt, schema, Path(tmp))
+                    with usage_scope(self.usage_store, 'jobs'):
+                        answer = RUNNERS[name](prompt, schema, Path(tmp))
                     validate_output(answer, schema)
                 except (AgentError, LLMError) as e:
                     self.failed[name] = str(e)

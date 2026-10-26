@@ -198,7 +198,7 @@ async function saveProfile() {
   state.example = false;
   notify('Profile saved on this computer.');
 }
-const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', settings: 'Settings'};
+const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', usage: 'Usage', settings: 'Settings'};
 function rememberView(view, replace = false) {
   const hash = '#' + view + (view === 'jobs' ? '/' + jobsTab : '');
   if (location.hash !== hash) history[replace ? 'replaceState' : 'pushState'](null, '', hash);
@@ -219,9 +219,32 @@ function showView(view, remember = true) {
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
   if (view === 'jobs') api('jobs').then(renderJobs).catch(e => notify(e.message, true));
+  if (view === 'usage') api('usage').then(renderUsage).catch(e => notify(e.message, true));
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
 }
-let jobsData = null, jobsTab = 'eligible', jobsPoll = null;
+let jobsData = null, jobsTab = 'eligible', jobsPoll = null, refreshPick = new Set();
+let companyImport = [];
+function renderCompanyImport(data) {
+  companyImport = data.rows;
+  $('#jobs-import-summary').textContent = `${data.ready} ready · ${data.duplicates} duplicates skipped · ${data.invalid} invalid`;
+  const list = $('#jobs-import-rows'); list.replaceChildren();
+  for (const row of data.rows) {
+    const pick = el('input', {type: 'checkbox', checked: row.status === 'ready', disabled: row.status !== 'ready',
+      'aria-label': `Import ${row.company || 'row ' + row.row}`, onchange: () => {row.selected = pick.checked; updateCompanyImport();}});
+    row.selected = pick.checked;
+    list.append(el('div', {class: 'csv-import-row'}, [pick, el('div', {}, [
+      el('strong', {text: row.company || `Row ${row.row}`}), el('small', {text: row.url || row.message}),
+      ...(row.url && row.message ? [el('small', {text: row.message})] : [])
+    ])]));
+  }
+  updateCompanyImport();
+  $('#jobs-import-dialog').showModal();
+}
+function updateCompanyImport() {
+  const count = companyImport.filter(row => row.selected).length;
+  $('#jobs-import-confirm').textContent = `Import ${count} companies`;
+  $('#jobs-import-confirm').disabled = !count;
+}
 const JOB_TABS = [['eligible', 'Eligible'], ['no', 'Not eligible'], ['applied', 'Applied']];
 function jobInTab(job, tab) {
   return job.category === tab;
@@ -240,6 +263,7 @@ function renderJobs(data) {
   const running = data.progress.running;
   $('#jobs-source-count').textContent = data.sources.length + (data.sources.length === 1 ? ' SOURCE' : ' SOURCES');
   const sources = $('#jobs-sources'); sources.replaceChildren();
+  refreshPick = new Set([...refreshPick].filter(id => data.sources.some(s => s.id === id)));
   for (const src of data.sources) {
     const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
       : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
@@ -252,13 +276,19 @@ function renderJobs(data) {
         notify('Location filter saved. Refresh to collect matching jobs.');
       });
     }}, [locationInput, el('button', {type: 'submit', class: 'text-button', text: 'Save locations', disabled: running})]);
+    const pick = el('input', {type: 'checkbox', checked: refreshPick.has(src.id), disabled: running,
+      'aria-label': `Include ${src.name} in Refresh selected`, onchange: e => {
+        e.target.checked ? refreshPick.add(src.id) : refreshPick.delete(src.id); syncRefreshSelected();
+      }});
     sources.append(el('div', {class: 'source-row'}, [
-      el('div', {class: 'source-info'}, [el('strong', {text: src.name}), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm]),
-      el('span', {class: 'pill', text: src.label.toUpperCase()}),
+      el('div', {class: 'source-info'}, [el('label', {class: 'source-pick'}, [pick, el('strong', {text: src.name})]), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm]),
+      el('div', {class: 'source-actions'}, [el('span', {class: 'pill', text: src.label.toUpperCase()}),
+      el('button', {type: 'button', class: 'secondary', text: 'Refresh ↻', disabled: running, title: `Refresh only ${src.name}`,
+        onclick: e => task(e.target, async () => renderJobs(await api('jobs/refresh', {sources: [src.id]})))}),
       el('button', {type: 'button', class: 'text-button', text: 'Remove', disabled: running, onclick: e => {
         if (!confirm(`Remove ${src.name} and its collected jobs?`)) return;
         task(e.target, async () => renderJobs(await api('jobs/sources/remove', {id: src.id})));
-      }})]));
+      }})])]));
   }
   if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No careers pages yet. Add one above.'}));
   const exp = data.experience;
@@ -273,7 +303,8 @@ function renderJobs(data) {
     : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
   $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
   $('#jobs-refresh').disabled = running;
-  $('#jobs-refresh').textContent = running ? 'Refreshing…' : 'Refresh now ↻';
+  $('#jobs-refresh').textContent = running ? 'Refreshing…' : 'Refresh all ↻';
+  syncRefreshSelected();
   const tabs = $('#jobs-tabs'); tabs.replaceChildren();
   for (const [id, name] of JOB_TABS) {
     const count = data.jobs.filter(j => jobInTab(j, id)).length;
@@ -288,6 +319,11 @@ function renderJobs(data) {
   clearTimeout(jobsPoll);
   if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
 }
+function syncRefreshSelected() {
+  const button = $('#jobs-refresh-selected'), count = refreshPick.size;
+  button.disabled = !count || Boolean(jobsData?.progress.running);
+  button.textContent = count ? `Refresh selected (${count})` : 'Refresh selected';
+}
 function renderJobList() {
   const data = jobsData, query = $('#jobs-search').value.trim().toLowerCase();
   for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['old', '#jobs-old-list']]) {
@@ -295,7 +331,7 @@ function renderJobList() {
     $('#jobs-count').textContent = data.jobs.length + ' SAVED JOBS';
     const list = $(selector); list.replaceChildren();
     if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
-    const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'missing'], unclear: ['UNCLEAR', '']};
+    const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'], unclear: ['UNCLEAR', '']};
     for (const job of jobs) {
       const [label, tone] = job.relevant === 'no' ? ['NOT RELEVANT', 'missing']
         : !job.relevant ? ['AWAITING REVIEW', ''] : verdicts[job.eligible] || ['CHECKING', ''];
@@ -468,6 +504,38 @@ function setupKeys() {
   });
   if (info.show_reminder) reminder.showModal();
 }
+function renderUsage(data) {
+  const n = value => Number(value).toLocaleString();
+  const usd = value => '$' + Number(value).toFixed(6);
+  const t = data.total, day = data.today;
+  $('#usage-period').textContent = `Since ${new Date(data.started_at).toLocaleString()} · Today: ${n(day.input_tokens + day.output_tokens)} tokens · ${usd(day.cost_usd)} combined valuation`;
+  const metrics = [
+    ['Total measured tokens', n(t.input_tokens + t.output_tokens)],
+    ['Input / output', `${n(t.input_tokens)} / ${n(t.output_tokens)}`],
+    ['Cached input', n(t.cached_input_tokens)],
+    ['Combined USD valuation' + (t.unpriced ? ' (partial)' : ''), usd(t.cost_usd)],
+    ['API cost estimate', usd(t.api_cost_usd)],
+    ['Subscription equivalent', usd(t.subscription_cost_usd)],
+    ['AI attempts / turns', n(t.calls)],
+    ['Local cache hits · no new tokens', n(t.cache_hits)]
+  ];
+  $('#usage-metrics').replaceChildren(...metrics.map(([label, value]) => el('div', {class: 'usage-metric'}, [el('small', {text: label}), el('strong', {text: value})])));
+  const warnings = [];
+  if (t.unmeasured) warnings.push(`${n(t.unmeasured)} attempts did not report complete token counts; token totals are partial.`);
+  if (t.unpriced) warnings.push(`${n(t.unpriced)} attempts could not be priced; dollar totals are a partial subtotal.`);
+  if (data.accounting_error) warnings.push('Some usage could not be saved. Totals may be incomplete.');
+  $('#usage-warning').hidden = !warnings.length;
+  $('#usage-warning').textContent = warnings.join(' ');
+  const rows = data.groups.map(g => el('div', {class: 'usage-model'}, [
+    el('div', {}, [el('strong', {text: `${g.provider} · ${g.model}`}), el('small', {text: `${g.channel === 'subscription' ? 'Subscription equivalent' : 'API estimate / reported charge'}${g.provider === 'codex' ? ' · valued as ' + g.valuation_model : ''}`})]),
+    el('div', {}, [el('strong', {text: `${n(g.input_tokens + g.output_tokens)} tokens · ${usd(g.cost_usd)}${g.unpriced ? ' (partial)' : ''}`}), el('small', {text: `${n(g.input_tokens)} input · ${n(g.output_tokens)} output · ${n(g.cached_input_tokens)} cached · ${n(g.calls)} attempts / turns · ${n(g.cache_hits)} local hits`})])
+  ]));
+  $('#usage-models').replaceChildren(...(rows.length ? rows : [el('p', {class: 'hint', text: 'No AI activity recorded yet. New resume and job AI calls will appear here.'})]));
+  $('#usage-reference').replaceChildren(...data.reference_models.map(model => el('option', {value: model, text: model, selected: model === data.codex_reference})));
+  $('#usage-rates').textContent = `Rates checked ${data.rates_checked}. Unknown models and unsupported context tiers are left unpriced. Claude CLI values use its own cost estimates when available.`;
+  $('#usage-sources').replaceChildren(...Object.entries(data.sources).map(([name, href]) => el('a', {href, text: name + ' pricing / usage', target: '_blank', rel: 'noopener noreferrer'})));
+}
+
 async function init() {
   state = await api('state'); profile = state.profile;
   selected = new Set(profile.projects.map(p => p.id));
@@ -476,6 +544,11 @@ async function init() {
   $('#output-dir').value = s.output_dir; $('#filename').value = s.filename;
   $('#tailoring-mode').value = s.tailorer; $('#model').value = s.model;
   setupKeys();
+  $('#usage-refresh').onclick = e => task(e.target, async () => renderUsage(await api('usage')));
+  $('#usage-reference-form').onsubmit = e => {
+    e.preventDefault();
+    task(e.submitter, async () => {renderUsage(await api('usage/settings', {model: $('#usage-reference').value})); notify('Valuation model saved.');});
+  };
   const missing = Object.entries(state.dependencies).filter(([, ok]) => !ok).map(([name]) => name);
   $('#dependencies').textContent = missing.length ? 'Missing PDF tools: ' + missing.join(', ') + '. See the README setup.' : '✓ All PDF tools are installed.';
   $('#dependencies').className = missing.length ? 'warning' : 'hint';
@@ -509,7 +582,28 @@ async function init() {
     for (const id of ['#jobs-company', '#jobs-url', '#jobs-include', '#jobs-exclude', '#jobs-locations']) $(id).value = '';
     notify('Careers page added. Refresh to collect its jobs.');
   });};
+  $('#jobs-csv').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 500000) throw new Error('Choose a CSV file under 500 KB.');
+      renderCompanyImport(await api('jobs/sources/preview', {csv: await file.text()}));
+    } catch (error) {notify(error.message, true);}
+    finally {e.target.value = '';}
+  };
+  $('#jobs-import-cancel').onclick = () => $('#jobs-import-dialog').close();
+  $('#jobs-import-confirm').onclick = e => task(e.target, async () => {
+    const rows = companyImport.filter(row => row.selected).map(({company, url}) => ({company, url}));
+    const result = await api('jobs/sources/import', {rows, locations: $('#jobs-import-locations').value});
+    $('#jobs-import-dialog').close();
+    renderJobs(result.state);
+    notify(`${result.imported} companies imported. ${result.skipped} duplicates skipped. Select companies to refresh when ready.`);
+  });
   $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
+  $('#jobs-refresh-selected').onclick = e => task(e.target, async () => {
+    renderJobs(await api('jobs/refresh', {sources: [...refreshPick]}));
+    syncRefreshSelected();
+  });
   $('#jobs-experience-form').onsubmit = e => {e.preventDefault(); task(e.submitter, async () => {
     await api('jobs/experience', {years: $('#jobs-years').value});
     renderJobs(await api('jobs/recheck', {})); notify('Experience saved. Rechecking jobs…');

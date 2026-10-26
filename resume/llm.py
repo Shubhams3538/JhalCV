@@ -179,6 +179,8 @@ def ask(prompt: str, schema: dict, *, model: str = DEFAULT_MODEL,
                 if cached is not None:
                     try:
                         result, hit = checked(cached), True
+                        from .usage import record_cache
+                        record_cache(route['provider'], route['model'])
                     except LLMError:
                         pass
             if result is None:

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .freshness import category, freshness, newest_first, posting_date
+from .imports import name_key, url_key
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
@@ -57,6 +58,8 @@ STATUSES = ('new', 'seen', 'applied', 'hidden')
 
 def location_matches(location: str, locations: str) -> bool:
     terms = [part.strip().casefold() for part in locations.split(',') if part.strip()]
+    if 'india' in terms:
+        terms.append('ind')  # ISO country code used by several official boards.
     value = location.casefold()
     return not terms or any(re.search(r'(?<!\w)' + re.escape(term) + r'(?!\w)', value) for term in terms)
 
@@ -125,6 +128,26 @@ class JobStore:
     def remove_source(self, ident: int) -> None:
         with self.db() as c:
             c.execute('DELETE FROM sources WHERE id = ?', (ident,))
+
+    def import_sources(self, rows, locations):
+        """Insert one reviewed batch atomically; recheck duplicates at commit time."""
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            existing = list(c.execute('SELECT name, url FROM sources'))
+            names = {name_key(s['name']) for s in existing}
+            urls = {url_key(s['url']) for s in existing}
+            imported = skipped = 0
+            for row in rows:
+                name, url = row['company'], row['url']
+                if name_key(name) in names or url_key(url) in urls:
+                    skipped += 1
+                    continue
+                c.execute('INSERT INTO sources (name,url,kind,locations,created_at) VALUES (?,?,?,?,?)',
+                          (name, url, row['kind'], locations, int(time.time())))
+                names.add(name_key(name))
+                urls.add(url_key(url))
+                imported += 1
+        return {'imported': imported, 'skipped': skipped}
 
     def source_result(self, ident: int, count=None, error=None) -> None:
         with self.db() as c:
@@ -210,13 +233,14 @@ class JobStore:
             c.execute('UPDATE jobs SET detail_attempted_at=? WHERE source_id=? AND external_id=?',
                       (time.time_ns(), source_id, external_id))
 
-    def unchecked(self, limit: int) -> list[dict]:
+    def unchecked(self, limit: int, source_ids=None) -> list[dict]:
         with self.db() as c:
             rows = [dict(r) for r in c.execute(
-                "SELECT j.id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
+                "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
                 "FROM jobs j JOIN sources s ON s.id=j.source_id "
                 "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden'")]
-        rows = [r for r in rows if r['status'] == 'applied' or location_matches(r['location'], r['locations'])]
+        rows = [r for r in rows if (source_ids is None or r['source_id'] in source_ids)
+                and (r['status'] == 'applied' or location_matches(r['location'], r['locations']))]
         return newest_first(rows)[:limit]
 
     def set_eligibility(self, verdicts: dict) -> None:

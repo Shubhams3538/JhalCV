@@ -37,6 +37,22 @@ class WebTests(unittest.TestCase):
         with urllib.request.urlopen(req) as response:
             return json.load(response)
 
+    def test_usage_persistence_and_authenticated_reference_setting(self):
+        usage = self.request('/api/usage')
+        self.assertEqual(usage['total']['calls'], 0)
+        self.app.usage.record('openai', 'gpt-4o-mini', 100, 20)
+        self.assertEqual(self.request('/api/usage')['total']['input_tokens'], 100)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/usage/settings', {'model': 'gpt-4o-mini'}, {'Content-Type': 'application/json'})
+        self.assertEqual(error.exception.code, 403)
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        saved = self.request('/api/usage/settings', {'model': 'gpt-4o-mini'}, headers)
+        self.assertEqual(saved['codex_reference'], 'gpt-4o-mini')
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/usage/settings', {'model': 'unknown'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        self.assertNotIn('key', saved)
+
     def test_state_and_authenticated_save(self):
         state = self.request('/api/state')
         self.assertTrue(state['example'])
@@ -73,6 +89,19 @@ class WebTests(unittest.TestCase):
         self.assertEqual(state['jobs'][0]['status'], 'applied')
         with self.assertRaises(urllib.error.HTTPError):
             self.request('/api/jobs/status', {'id': ident, 'status': 'deleted'}, headers)
+
+    def test_company_csv_preview_and_import_endpoints(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        preview = self.request('/api/jobs/sources/preview',
+                               {'csv': 'company,url\nExample,https://jobs.lever.co/example\n'}, headers)
+        self.assertEqual(preview['ready'], 1)
+        self.assertEqual(self.app.jobs.store.sources(), [])
+        imported = self.request('/api/jobs/sources/import', {'rows': preview['rows'], 'locations': 'India'}, headers)
+        self.assertEqual(imported['imported'], 1)
+        self.assertEqual(imported['state']['sources'][0]['locations'], 'India')
+        self.assertFalse(imported['state']['progress']['running'])
+        repeated = self.request('/api/jobs/sources/import', {'rows': preview['rows']}, headers)
+        self.assertEqual((repeated['imported'], repeated['skipped']), (0, 1))
 
     def test_saved_source_location_filter_updates_without_removing_applied_jobs(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
@@ -117,6 +146,19 @@ class WebTests(unittest.TestCase):
         self.assertEqual([j['id'] for j in state['jobs']], [ids[1]])
         with self.assertRaises(urllib.error.HTTPError):
             self.request('/api/jobs/delete-all', {'category':'all'}, headers)
+
+    def test_refresh_validates_chosen_companies(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        src = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)['sources'][0]
+        for bad in ([], [999], ['1'], [True], 'all'):
+            with self.subTest(bad=bad), self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/jobs/refresh', {'sources': bad}, headers)
+            self.assertEqual(error.exception.code, 400)
+        with patch.object(self.app.jobs, 'start', return_value=True) as start:
+            self.request('/api/jobs/refresh', {'sources': [src['id']]}, headers)
+            self.request('/api/jobs/refresh', {}, headers)
+        self.assertEqual(start.call_args_list[0].kwargs['source_ids'], {src['id']})
+        self.assertIsNone(start.call_args_list[1].kwargs['source_ids'])
 
     def test_foreign_origin_and_host_are_rejected(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token, 'Origin': 'https://evil.test'}

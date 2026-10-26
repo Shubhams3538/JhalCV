@@ -1095,5 +1095,59 @@ button:focus-visible, a:focus-visible { outline:2px solid var(--blue); }
 .jobs-category-tools { display:flex; gap:12px; align-items:start; justify-content:space-between; flex-wrap:wrap; }
 .jobs-category-tools > .text-button { padding-top:6px; }
 .jobs-drawer { border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
+.csv-import-tools { margin-top:20px; border-top:1px solid var(--line); padding-top:18px; }
+.csv-upload { display:inline-block; cursor:pointer; }
+.csv-upload:focus-within { outline:2px solid var(--accent); outline-offset:3px; }
+#jobs-import-dialog { width:min(760px, calc(100vw - 32px)); max-height:85vh; overflow:auto; }
+#jobs-import-rows { max-height:42vh; overflow:auto; margin:20px 0; text-align:left; }
+.csv-import-row { display:flex; align-items:start; gap:12px; padding:10px 2px; border-top:1px solid var(--line); }
+.csv-import-row input { width:18px; flex:none; margin-top:4px; }
+.csv-import-row div { min-width:0; }
+.csv-import-row small { display:block; overflow-wrap:anywhere; color:var(--muted); }
 .jobs-drawer > summary { cursor:pointer; color:var(--muted); font-weight:600; }
 .jobs-drawer > summary .pill { margin-left:8px; }
+.source-pick {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin:0;
+  cursor:pointer
+}
+.source-pick input {
+  width:15px;
+  accent-color:var(--blue)
+}
+.source-actions {
+  display:flex;
+  gap:8px;
+  align-items:center
+}
+.jobs-toolbar .secondary {
+  white-space:nowrap
+}
+#jobs-sources .source-row {
+  grid-template-columns:1fr;
+  gap:8px
+}
+#jobs-sources .source-actions {
+  flex-wrap:wrap
+}
+#jobs-sources .source-actions .pill {
+  margin-right:auto
+}
+.pill.ineligible {
+  background:var(--error-bg);
+  border-color:var(--error-line);
+  color:var(--error-ink)
+}
+
+/* Local AI usage ledger */
+.usage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}
+.usage-metric{padding:18px;background:var(--field);border:1px solid var(--line);border-radius:12px;min-width:0}
+.usage-metric small,.usage-model small{display:block;color:var(--muted);font-size:12px;line-height:1.6}
+.usage-metric strong{display:block;font-size:22px;margin-top:9px;overflow-wrap:anywhere}
+.usage-model{display:flex;justify-content:space-between;gap:20px;padding:18px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.usage-sources{display:flex;flex-wrap:wrap;gap:20px;font-size:13px}.usage-sources a{color:var(--blue)}
+#usage-reference-form{max-width:560px}
+@media(max-width:1000px){.usage-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.usage-model{flex-direction:column;gap:8px}}
+@media(max-width:480px){.usage-grid{grid-template-columns:1fr}}

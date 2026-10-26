@@ -4,7 +4,11 @@ from __future__ import annotations
 import html
 import ipaddress
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from urllib.parse import urljoin, urlsplit
@@ -64,6 +68,54 @@ def _open(request: urllib.request.Request, limit: int = MAX_BYTES) -> bytes:
 def get_text(url: str, headers: dict | None = None, limit: int = MAX_BYTES) -> str:
     request = urllib.request.Request(url, headers={**HEADERS, **(headers or {})})
     return _open(request, limit).decode('utf-8', errors='replace')
+
+
+CHROME_CANDIDATES = (
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'msedge',
+    os.path.expandvars(r'%ProgramFiles%\Google\Chrome\Application\chrome.exe'),
+    os.path.expandvars(r'%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe'),
+)
+RENDER_TIMEOUT = 60
+
+
+def browser() -> str | None:
+    """An installed Chrome-family browser that can render pages headlessly."""
+    for candidate in CHROME_CANDIDATES:
+        found = candidate if os.path.isfile(candidate) else shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def render_page(url: str) -> str:
+    """The page as a browser sees it after its JavaScript has run.
+
+    Many career sites (Meta, for example) load their listings with JavaScript
+    or reject plain requests. A headless browser with a throwaway profile
+    reads them the way the user's own browser does.
+    """
+    check_url(url)
+    chrome = browser()
+    if not chrome:
+        raise FetchError('This page needs a browser to load its jobs. Install Google Chrome and refresh.')
+    with tempfile.TemporaryDirectory(prefix='jhalcv-chrome-') as profile:
+        try:
+            proc = subprocess.run(
+                [chrome, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+                 '--disable-extensions', '--mute-audio', f'--user-data-dir={profile}',
+                 '--virtual-time-budget=20000', '--dump-dom', url],
+                capture_output=True, timeout=RENDER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise FetchError('The page took too long to load in the browser.') from None
+        except OSError:
+            raise FetchError('Could not start Chrome to load this page.') from None
+    page = proc.stdout[:MAX_BYTES].decode('utf-8', errors='replace')
+    if proc.returncode != 0 or len(page) < 500:
+        raise FetchError('Chrome could not load this page.')
+    return page
 
 
 def get_json(url: str):
