@@ -9,7 +9,8 @@ from pathlib import Path
 from . import eligibility, sources
 from .agents import Agents, AgentError, NAMES
 from .fetch import FetchError, check_url
-from .store import JobStore
+from .store import JobStore, location_matches
+from .freshness import freshness, newest_first
 
 MAX_DETAILS = 40     # detail pages fetched per source per run (new jobs only)
 MAX_CHECKS = 120     # experience checks per run
@@ -53,13 +54,21 @@ class JobService:
         self.store.reset_eligibility()
 
     # sources
-    def add_source(self, name, url, include='', exclude='') -> dict:
+    def add_source(self, name, url, include='', exclude='', locations='') -> dict:
         name = ' '.join(str(name or '').split())[:100]
         if not name:
             raise ValueError('Enter the company name.')
         url = check_url(url)
         return self.store.add_source(name, url, sources.detect(url),
-                                     str(include or '')[:500], str(exclude or '')[:500])
+                                     str(include or '')[:500], str(exclude or '')[:500],
+                                     self._locations(locations))
+
+    @staticmethod
+    def _locations(value) -> str:
+        return ', '.join(part.strip() for part in str(value or '')[:500].split(',') if part.strip())
+
+    def set_source_locations(self, ident, value) -> None:
+        self.store.set_source_locations(ident, self._locations(value))
 
     # refresh
     def start(self, profile: dict, recheck_only=False) -> bool:
@@ -100,21 +109,46 @@ class JobService:
             if not recheck_only:
                 for src in self.store.sources():
                     say(f'Reading {src["name"]}…')
+                    attempted = set()
                     try:
                         if src['kind'] == 'page':
                             items = sources.page_jobs(src['url'], agents.ask)
                         else:
                             items = sources.READERS[src['kind']](src['url'])
-                        items = [j for j in items if title_matches(j['title'], src['include'], src['exclude'])][:sources.MAX_JOBS]
+                        items = newest_first([dict(j) for j in items if freshness(j.get('posted')) != 'expired'
+                                              and title_matches(j['title'], src['include'], src['exclude'])
+                                              and location_matches(j.get('location') or '', src['locations'])])[:sources.MAX_JOBS]
+                        detail = sources.DETAILS.get(src['kind'])
+                        attempted = set()
+                        # Resolve new detail-only dates before admitting jobs to the saved collection.
+                        known = self.store.known_ids(src['id'])
+                        if detail:
+                            for item in items:
+                                if len(attempted) >= MAX_DETAILS:
+                                    break
+                                if item['external_id'] not in known and item.get('needs_detail') and (not item['requirements'] or freshness(item.get('posted')) == 'unknown'):
+                                    attempted.add(item['external_id'])
+                                    say(f'Reading {src["name"]} new job details ({len(attempted)}/{MAX_DETAILS})…')
+                                    try:
+                                        item.update(detail(item))
+                                        if freshness(item.get('posted')) == 'expired':
+                                            self.store.dismiss_external(src['id'], item['external_id'])
+                                            known.add(item['external_id'])
+                                    except FetchError:
+                                        pass
+                        items = [j for j in items if freshness(j.get('posted')) != 'expired']
                         details = {j['external_id']: j for j in items if j.get('needs_detail')}
                         fresh = self.store.save_listing(src['id'], items)
-                        detail = sources.DETAILS.get(src['kind'])
-                        if detail and fresh:
-                            pending = [r for r in (self.store.job(i) for i in fresh)
-                                       if not r['requirements'] and r['external_id'] in details][:MAX_DETAILS]
+                        for ext in attempted:
+                            self.store.note_detail_attempt(src['id'], ext)
+                        if detail and src['kind'] != 'page':
+                            candidates = self.store.detail_candidates(src['id'])
+                            pending = [r for r in candidates
+                                       if r['external_id'] in details and r['external_id'] not in attempted][:MAX_DETAILS-len(attempted)]
                             for n, row in enumerate(pending, 1):
-                                say(f'Reading {src["name"]} job details ({n}/{len(pending)})…')
+                                say(f'Reading {src["name"]} saved job details ({n}/{len(pending)})…')
                                 try:
+                                    self.store.note_detail_attempt(src['id'], row['external_id'])
                                     self.store.set_detail(row['id'], detail(details[row['external_id']]))
                                 except FetchError:
                                     pass
@@ -124,10 +158,23 @@ class JobService:
                     except (FetchError, AgentError, KeyError, ValueError, TypeError, IndexError) as e:
                         failures.append(src['name'])
                         self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
+                    if src['kind'] == 'page':
+                        # Search failure does not prevent checking already-saved direct links.
+                        pending = [r for r in self.store.detail_candidates(src['id'])
+                                   if r['external_id'] not in attempted and r['url']][:MAX_DETAILS-len(attempted)]
+                        for row in pending:
+                            self.store.note_detail_attempt(src['id'], row['external_id'])
+                            say(f'Checking saved {src["name"]} posting dates…')
+                            try:
+                                self.store.set_detail(row['id'], sources.DETAILS['page']({'needs_detail': row['url']}))
+                            except FetchError:
+                                pass
+
+            self.store.prune_old()
             years = self.experience_years(profile)['years']
             todo = self.store.unchecked(MAX_CHECKS)
             if todo:
-                say(f'Checking experience requirements for {len(todo)} job(s)…')
+                say(f'Checking relevance and experience for {len(todo)} job(s)…')
                 self.store.set_eligibility(eligibility.check(todo, years, agents))
             self.store.set_meta('last_refresh', int(time.time()))
             parts = [] if recheck_only else [f'{found} matching job(s), {new} new']
@@ -141,6 +188,7 @@ class JobService:
             os.close(fd)
 
     def state(self, profile: dict) -> dict:
+        self.store.prune_old()
         return {'sources': [{**s, 'label': sources.LABELS[s['kind']]} for s in self.store.sources()],
                 'jobs': self.store.jobs(), 'progress': dict(self.progress),
                 'experience': self.experience_years(profile),

@@ -198,27 +198,35 @@ async function saveProfile() {
   state.example = false;
   notify('Profile saved on this computer.');
 }
-function showView(view) {
+const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', settings: 'Settings'};
+function rememberView(view, replace = false) {
+  const hash = '#' + view + (view === 'jobs' ? '/' + jobsTab : '');
+  if (location.hash !== hash) history[replace ? 'replaceState' : 'pushState'](null, '', hash);
+}
+function restoreView() {
+  const [requested, tab] = location.hash.slice(1).split('/');
+  const view = Object.hasOwn(VIEW_LABELS, requested) ? requested : 'workspace';
+  if (view === 'jobs') jobsTab = JOB_TABS.some(([id]) => id === tab) ? tab : 'eligible';
+  rememberView(view, true);
+  showView(view, false);
+}
+function showView(view, remember = true) {
+  if (!Object.hasOwn(VIEW_LABELS, view)) view = 'workspace';
+  if (remember) rememberView(view);
   document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== view);
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-  $('#breadcrumb').textContent = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', settings: 'Settings'}[view];
+  $('#breadcrumb').textContent = VIEW_LABELS[view];
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
   if (view === 'jobs') api('jobs').then(renderJobs).catch(e => notify(e.message, true));
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
 }
 let jobsData = null, jobsTab = 'eligible', jobsPoll = null;
-const JOB_TABS = [['eligible', 'Eligible'], ['unclear', 'Unclear'], ['no', 'Not eligible'], ['pending', 'Checking'],
-  ['applied', 'Applied'], ['hidden', 'Hidden'], ['all', 'All']];
+const JOB_TABS = [['eligible', 'Eligible'], ['no', 'Not eligible'], ['applied', 'Applied']];
 function jobInTab(job, tab) {
-  if (tab === 'hidden') return job.status === 'hidden';
-  if (job.status === 'hidden') return false;
-  if (tab === 'applied') return job.status === 'applied';
-  if (tab === 'all') return true;
-  if (job.status === 'applied') return false;
-  if (tab === 'pending') return !job.eligible;
-  return job.eligible === tab || (tab === 'eligible' && job.eligible === 'yes');
+  return job.category === tab;
 }
+
 function ago(seconds) {
   if (!seconds) return 'never';
   const mins = Math.round((Date.now() / 1000 - seconds) / 60);
@@ -235,8 +243,17 @@ function renderJobs(data) {
   for (const src of data.sources) {
     const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
       : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
+    const locationInput = el('input', {type: 'text', value: src.locations || '', maxLength: 500,
+      placeholder: 'India, Remote', 'aria-label': `Locations to keep for ${src.name}`});
+    const locationForm = el('form', {class: 'source-location-form', onsubmit: e => {
+      e.preventDefault();
+      task(e.submitter, async () => {
+        renderJobs(await api('jobs/sources/locations', {id: src.id, locations: locationInput.value}));
+        notify('Location filter saved. Refresh to collect matching jobs.');
+      });
+    }}, [locationInput, el('button', {type: 'submit', class: 'text-button', text: 'Save locations', disabled: running})]);
     sources.append(el('div', {class: 'source-row'}, [
-      el('div', {class: 'source-info'}, [el('strong', {text: src.name}), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status]),
+      el('div', {class: 'source-info'}, [el('strong', {text: src.name}), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm]),
       el('span', {class: 'pill', text: src.label.toUpperCase()}),
       el('button', {type: 'button', class: 'text-button', text: 'Remove', disabled: running, onclick: e => {
         if (!confirm(`Remove ${src.name} and its collected jobs?`)) return;
@@ -253,7 +270,7 @@ function renderJobs(data) {
   const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
   $('#jobs-progress').textContent = running ? data.progress.message
     : data.progress.error ? 'Last refresh failed: ' + data.progress.error
-    : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Experience checks: ${agents}.`;
+    : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
   $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
   $('#jobs-refresh').disabled = running;
   $('#jobs-refresh').textContent = running ? 'Refreshing…' : 'Refresh now ↻';
@@ -261,38 +278,49 @@ function renderJobs(data) {
   for (const [id, name] of JOB_TABS) {
     const count = data.jobs.filter(j => jobInTab(j, id)).length;
     tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab),
-      text: `${name} ${count}`, onclick: () => {jobsTab = id; renderJobs(jobsData);}}));
+      text: `${name} ${count}`, onclick: () => {jobsTab = id; rememberView('jobs'); renderJobs(jobsData);}}));
   }
+  $('#jobs-review-count').textContent = data.jobs.filter(j => jobInTab(j, 'review')).length;
+  $('#jobs-old-count').textContent = data.jobs.filter(j => jobInTab(j, 'old')).length;
+  $('#jobs-review').hidden = jobsTab !== 'eligible';
+  $('#jobs-old').hidden = jobsTab !== 'eligible';
   renderJobList();
   clearTimeout(jobsPoll);
   if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
 }
 function renderJobList() {
   const data = jobsData, query = $('#jobs-search').value.trim().toLowerCase();
-  const jobs = data.jobs.filter(j => jobInTab(j, jobsTab) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
-  $('#jobs-count').textContent = data.jobs.filter(j => j.status !== 'hidden').length + ' JOBS';
-  const list = $('#jobs-list'); list.replaceChildren();
-  if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this view.' : 'Jobs appear here after a refresh.'}));
-  const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'missing'], unclear: ['UNCLEAR', '']};
-  for (const job of jobs.slice(0, 300)) {
-    const [label, tone] = verdicts[job.eligible] || ['CHECKING', ''];
-    const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
-    const meta = [job.company, job.location, job.posted && 'posted ' + job.posted].filter(Boolean).join(' · ');
-    const actions = el('div', {class: 'job-actions'}, [el('button', {type: 'button', class: 'secondary', text: 'Tailor resume', onclick: e => task(e.target, () => tailorForJob(job))})]);
-    if (job.status === 'hidden') actions.append(el('button', {type: 'button', class: 'text-button', text: 'Restore', onclick: setStatus('seen')}));
-    else {
-      actions.append(job.status === 'applied'
-        ? el('button', {type: 'button', class: 'text-button', text: 'Not applied', onclick: setStatus('seen')})
-        : el('button', {type: 'button', class: 'text-button', text: 'Mark applied', onclick: setStatus('applied')}));
-      actions.append(el('button', {type: 'button', class: 'text-button', text: 'Hide', onclick: setStatus('hidden')}));
+  for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['old', '#jobs-old-list']]) {
+    const jobs = data.jobs.filter(j => jobInTab(j, group) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
+    $('#jobs-count').textContent = data.jobs.length + ' SAVED JOBS';
+    const list = $(selector); list.replaceChildren();
+    if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
+    const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'missing'], unclear: ['UNCLEAR', '']};
+    for (const job of jobs) {
+      const [label, tone] = job.relevant === 'no' ? ['NOT RELEVANT', 'missing']
+        : !job.relevant ? ['AWAITING REVIEW', ''] : verdicts[job.eligible] || ['CHECKING', ''];
+      const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
+      const meta = [job.company, job.location, job.freshness === 'unknown' ? 'Posting date unverified' : job.posted && 'posted ' + job.posted, job.active === 0 && 'Not returned in latest refresh'].filter(Boolean).join(' · ');
+      const actions = el('div', {class: 'job-actions'}, [el('button', {type: 'button', class: 'secondary', text: 'Tailor resume', onclick: e => task(e.target, () => tailorForJob(job))})]);
+      if (job.status === 'hidden') actions.append(el('button', {type: 'button', class: 'text-button', text: 'Restore', onclick: setStatus('seen')}));
+      else {
+        actions.append(job.status === 'applied'
+          ? el('button', {type: 'button', class: 'text-button', text: 'Not applied', onclick: setStatus('seen')})
+          : el('button', {type: 'button', class: 'text-button', text: 'Mark applied', onclick: setStatus('applied')}));
+      }
+      actions.append(el('button', {type: 'button', class: 'text-button', text: 'Delete', onclick: e => {
+        if (!confirm('Delete this saved job? It will not be collected again from this careers page.')) return;
+        task(e.target, async () => renderJobs(await api('jobs/delete', {id: job.id})));
+      }}));
+      list.append(el('div', {class: 'job-row'}, [
+        el('div', {class: 'job-info'}, [
+          el('div', {class: 'job-title'}, [el('a', {href: job.url, target: '_blank', rel: 'noopener', text: job.title}),
+            ...(job.status === 'new' ? [el('span', {class: 'job-new', text: 'NEW'})] : [])]),
+          el('small', {text: meta}),
+          ...(job.relevance_reason ? [el('small', {class: 'job-reason', text: 'Relevance: ' + job.relevance_reason})] : []),
+          ...(job.reason ? [el('small', {class: 'job-reason', text: job.reason + (job.checked_by === 'rules' ? ' (text rules)' : '')})] : [])]),
+        el('span', {class: 'pill ' + tone, text: label}), actions]));
     }
-    list.append(el('div', {class: 'job-row'}, [
-      el('div', {class: 'job-info'}, [
-        el('div', {class: 'job-title'}, [el('a', {href: job.url, target: '_blank', rel: 'noopener', text: job.title}),
-          ...(job.status === 'new' ? [el('span', {class: 'job-new', text: 'NEW'})] : [])]),
-        el('small', {text: meta}),
-        ...(job.reason ? [el('small', {class: 'job-reason', text: job.reason + (job.checked_by === 'rules' ? ' (text rules)' : '')})] : [])]),
-      el('span', {class: 'pill ' + tone, text: label}), actions]));
   }
 }
 async function tailorForJob(job) {
@@ -477,8 +505,8 @@ async function init() {
   $('#tailor').onclick = e => task(e.target, createDraft);
   $('#jobs-source-form').onsubmit = e => {e.preventDefault(); task(e.submitter, async () => {
     renderJobs(await api('jobs/sources/add', {name: $('#jobs-company').value, url: $('#jobs-url').value,
-      include: $('#jobs-include').value, exclude: $('#jobs-exclude').value}));
-    for (const id of ['#jobs-company', '#jobs-url', '#jobs-include', '#jobs-exclude']) $(id).value = '';
+      include: $('#jobs-include').value, exclude: $('#jobs-exclude').value, locations: $('#jobs-locations').value}));
+    for (const id of ['#jobs-company', '#jobs-url', '#jobs-include', '#jobs-exclude', '#jobs-locations']) $(id).value = '';
     notify('Careers page added. Refresh to collect its jobs.');
   });};
   $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
@@ -491,6 +519,17 @@ async function init() {
     renderJobs(await api('jobs/recheck', {})); notify('Using your profile dates. Rechecking jobs…');
   });
   $('#jobs-search').oninput = () => jobsData && renderJobList();
+  document.querySelectorAll('[data-delete-jobs]').forEach(button => button.onclick = e => {
+    const group = button.dataset.deleteJobs || jobsTab;
+    const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', old: 'Old'};
+    const count = jobsData?.jobs.filter(j => jobInTab(j, group)).length || 0;
+    if (!count) return;
+    if (!confirm(`Delete all ${count} jobs in ${names[group]}? This includes jobs hidden by search. Deleted jobs will not return on refresh.`)) return;
+    task(e.target, async () => renderJobs(await api('jobs/delete-all', {category: group})));
+  });
+
+  window.addEventListener('hashchange', restoreView);
+  restoreView();
   $('#insights-unhide').onclick = e => task(e.target, async () => renderInsights((await api('insights/unhide', {})).insights));
   $('#insights-reset').onclick = e => {
     if (!confirm('Clear every analyzed job and hidden skill from Insights? Your profile is not changed.')) return;

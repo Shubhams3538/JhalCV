@@ -169,7 +169,9 @@ class App:
             job = self.jobs.store.job(ident())
             return {key: job[key] for key in ('id', 'title', 'company', 'location', 'url', 'description')}
         if path == '/api/jobs/sources/add':
-            self.jobs.add_source(body.get('name'), body.get('url'), body.get('include', ''), body.get('exclude', ''))
+            self.jobs.add_source(body.get('name'), body.get('url'), body.get('include', ''), body.get('exclude', ''), body.get('locations', ''))
+        elif path == '/api/jobs/sources/locations':
+            self.jobs.set_source_locations(ident(), body.get('locations', ''))
         elif path == '/api/jobs/sources/remove':
             self.jobs.store.remove_source(ident())
         elif path == '/api/jobs/refresh':
@@ -180,6 +182,10 @@ class App:
         elif path == '/api/jobs/recheck':
             if not self.jobs.start(profile, recheck_only=True):
                 raise ValueError('A refresh is already running.')
+        elif path == '/api/jobs/delete-all':
+            self.jobs.store.delete_category(body.get('category'))
+        elif path == '/api/jobs/delete':
+            self.jobs.store.delete_job(ident())
         elif path == '/api/jobs/status':
             self.jobs.store.set_status(ident(), body.get('status'))
         elif path == '/api/jobs/experience':
@@ -309,6 +315,7 @@ def handler(app):
                     return self.reply(404, {'error': str(e)})
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if path in files:
                 name, mime = files[path]
