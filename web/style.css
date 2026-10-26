@@ -940,6 +940,16 @@ details[open] > summary::before {
 .companies-toolbar > .pill {
   margin-right: auto;
 }
+.companies-search {
+  width: 220px;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .companies-search {
+    width: 100%;
+    order: 5;
+  }
+}
 .add-company {
   position: relative;
 }

@@ -266,7 +266,9 @@ function renderJobs(data) {
   $('#jobs-source-count').textContent = data.sources.length + (data.sources.length === 1 ? ' COMPANY' : ' COMPANIES');
   const sources = $('#jobs-sources'); const sourceScroll = sources.scrollTop; sources.replaceChildren();
   refreshPick = new Set([...refreshPick].filter(id => data.sources.some(s => s.id === id)));
-  for (const src of data.sources) {
+  const companyQuery = ($('#companies-search')?.value || '').trim().toLowerCase();
+  const visibleSources = data.sources.filter(s => !companyQuery || s.name.toLowerCase().includes(companyQuery));
+  for (const src of visibleSources) {
     const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
       : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
     const locationInput = el('input', {type: 'text', value: src.locations || '', maxLength: 500,
@@ -297,7 +299,8 @@ function renderJobs(data) {
         task(e.target, async () => renderJobs(await api('jobs/sources/remove', {id: src.id})));
       }})])]));
   }
-  if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No careers pages yet. Add one above.'}));
+  if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No companies yet. Add one above.'}));
+  else if (!visibleSources.length) sources.append(el('p', {class: 'empty', text: 'No companies match your search.'}));
   sources.scrollTop = sourceScroll;
   const exp = data.experience;
   if (document.activeElement !== $('#jobs-years')) $('#jobs-years').value = exp.years;
@@ -737,6 +740,7 @@ async function init() {
     renderJobs(await api('jobs/recheck', {})); notify('Using your profile dates. Rechecking jobs…');
   });
   $('#jobs-search').oninput = () => jobsData && renderJobList();
+  $('#companies-search').oninput = () => jobsData && renderJobs(jobsData);
   document.querySelectorAll('[data-delete-jobs]').forEach(button => button.onclick = e => {
     const group = button.dataset.deleteJobs || jobsTab;
     const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', old: 'Old'};
