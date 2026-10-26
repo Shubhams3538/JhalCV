@@ -67,6 +67,27 @@ class WebTests(unittest.TestCase):
             self.assertEqual(stored[key], profile[key])
         self.assertEqual(stored['experience'][0]['bullets'], [b['text'] for b in profile['experience'][0]['bullets']])
 
+    @patch('resume.descriptions.llm.have_key', return_value=False)
+    def test_drafts_feed_insights_and_missing_skills_can_be_added(self, _):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({'output_dir': 'build', 'filename': 'shubham_Resume', 'tailorer': 'rules', 'model': 'test'})
+        jd = 'Backend engineer with Python, Kubernetes and Kafka experience building reliable services.'
+        self.app.post('/api/tailor', {'jd': jd, 'projects': [profile['projects'][0]['id']]})
+        self.app.post('/api/tailor', {'jd': jd, 'projects': [profile['projects'][0]['id']]})
+        insights = self.request('/api/insights')
+        self.assertEqual(insights['jobs'], 1)
+        missing = {m['skill'] for m in insights['missing']}
+        self.assertIn('Kafka', missing)
+        group = next(k for k, v in profile['skills'].items() if not k.startswith('_') and isinstance(v, list))
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        result = self.request('/api/insights/add', {'skill': 'Kafka', 'group': group}, headers)
+        self.assertIn('Kafka', result['profile']['skills'][group])
+        self.assertNotIn('Kafka', {m['skill'] for m in result['insights']['missing']})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/insights/add', {'skill': 'kafka', 'group': group}, headers)
+        self.assertEqual(error.exception.code, 400)
+
     def test_remove_project_persists_after_reload_and_restart(self):
         profile = self.app.store.profile()
         self.app.store.save_profile(profile)

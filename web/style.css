@@ -502,7 +502,8 @@ footer {
   color:#3c7151;
   border-radius:7px;
   box-shadow:0 3px 12px #00000008;
-  white-space:pre-line
+  white-space:pre-line;
+  cursor:pointer
 }
 #notice.error {
   background:#fff1f3;
@@ -818,3 +819,63 @@ dialog small { font-size: 9px; color: var(--muted); }
 .key-model-editor summary { cursor: pointer; font-size: 10px; color: var(--blue); }
 .key-model-editor select, .key-model-editor input { margin-top: 8px; }
 .key-model-editor button { margin-top: 8px; }
+.insight-row {
+  display:grid;
+  grid-template-columns:minmax(150px,1.1fr) minmax(120px,1.4fr) auto;
+  gap:16px;
+  align-items:center;
+  padding:12px 0;
+  border-top:1px solid var(--line)
+}
+.insight-row:first-child {
+  border-top:0
+}
+.insight-name {
+  display:flex;
+  flex-direction:column
+}
+.insight-stat {
+  color:var(--muted)
+}
+.insight-bar {
+  height:8px;
+  border-radius:99px;
+  background:var(--pale);
+  overflow:hidden
+}
+.insight-bar span {
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:var(--blue)
+}
+.insight-actions {
+  display:flex;
+  gap:8px;
+  align-items:center
+}
+.insight-actions select {
+  max-width:150px
+}
+.pill.owned {
+  background:#e8f6ee;
+  color:#1f7a45
+}
+.pill.missing {
+  background:#fdf0e6;
+  color:#b25a14
+}
+.insights-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:16px
+}
+@media (max-width:760px) {
+  .insight-row {
+    grid-template-columns:1fr
+  }
+}
+.insight-row > .pill {
+  width:96px;
+  text-align:center
+}

@@ -20,7 +20,10 @@ function notify(message, error = false) {
   notice.hidden = false;
   notice.textContent = message;
   notice.className = error ? 'error' : '';
-  if (!error) noticeTimer = setTimeout(() => { notice.hidden = true; }, 5000);
+  notice.title = 'Click to dismiss';
+  notice.onclick = () => { clearTimeout(noticeTimer); notice.hidden = true; };
+  // Errors stay a little longer so there is time to read them.
+  noticeTimer = setTimeout(() => { notice.hidden = true; }, error ? 8000 : 5000);
 }
 async function api(path, body) {
   const response = await fetch('/api/' + path, body === undefined ? {} : {
@@ -195,9 +198,52 @@ async function saveProfile() {
 function showView(view) {
   document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== view);
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-  $('#breadcrumb').textContent = {workspace: 'Tailor resume', profile: 'My profile', settings: 'Settings'}[view];
+  $('#breadcrumb').textContent = {workspace: 'Tailor resume', profile: 'My profile', insights: 'Insights', settings: 'Settings'}[view];
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
+  if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
+}
+function insightBar(item) {
+  const fill = el('span'); fill.style.width = item.percent + '%';
+  return el('div', {class: 'insight-bar', 'aria-hidden': 'true'}, [fill]);
+}
+function insightStat(item, jobs) {
+  return el('small', {class: 'insight-stat', text: `${item.count} of ${jobs} job${jobs === 1 ? '' : 's'} · ${item.percent}%`});
+}
+function renderInsights(data) {
+  const jobs = data.jobs;
+  $('#insights-summary').textContent = jobs
+    ? `${jobs} job${jobs === 1 ? '' : 's'} analyzed. Skills these jobs asked for that your profile does not list anywhere. Add the ones you can genuinely speak to.`
+    : 'No jobs analyzed yet. Each tailored draft adds its job description here.';
+  $('#insights-unhide').hidden = !data.hidden;
+  $('#insights-unhide').textContent = `Show ${data.hidden} hidden skill${data.hidden === 1 ? '' : 's'}`;
+  const groups = Object.entries(profile.skills).filter(([k, v]) => !k.startsWith('_') && Array.isArray(v)).map(([k]) => k);
+  const missing = $('#insights-missing'); missing.replaceChildren();
+  if (jobs && !data.missing.length) missing.append(el('p', {class: 'empty', text: 'Nothing missing. Your profile covers every skill these jobs asked for.'}));
+  for (const item of data.missing) {
+    const group = el('select', {'aria-label': 'Skill group for ' + item.skill},
+      groups.map(g => el('option', {value: g, text: g})));
+    const add = el('button', {type: 'button', class: 'secondary', text: 'Add to skills', disabled: !groups.length, onclick: e => task(e.target, async () => {
+      if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
+      await api('profile', profile);
+      const result = await api('insights/add', {skill: item.skill, group: group.value});
+      profile = result.profile; invalidate(); renderInsights(result.insights);
+      notify(`${item.skill} added to ${group.value}. The AI can use it from your next resume.`);
+    })});
+    const hide = el('button', {type: 'button', class: 'text-button', text: 'Hide', onclick: e => task(e.target, async () => {
+      renderInsights((await api('insights/hide', {skill: item.key})).insights);
+    })});
+    missing.append(el('div', {class: 'insight-row'}, [
+      el('div', {class: 'insight-name'}, [el('strong', {text: item.skill}), insightStat(item, jobs)]), insightBar(item),
+      el('div', {class: 'insight-actions'}, [group, add, hide])]));
+  }
+  const asked = $('#insights-asked'); asked.replaceChildren();
+  if (!jobs) asked.append(el('p', {class: 'empty', text: 'Tailor a resume to start building this list.'}));
+  for (const item of data.asked) {
+    asked.append(el('div', {class: 'insight-row'}, [
+      el('div', {class: 'insight-name'}, [el('strong', {text: item.skill}), insightStat(item, jobs)]), insightBar(item),
+      el('span', {class: 'pill ' + (item.owned ? 'owned' : 'missing'), text: item.owned ? 'IN PROFILE' : 'MISSING'})]));
+  }
 }
 function fillModelSelect(select, providerId, current) {
   const provider = state.credentials.providers.find(p => p.id === providerId);
@@ -328,6 +374,11 @@ async function init() {
   };
   $('#import-project').onclick = e => task(e.target, importProject);
   $('#tailor').onclick = e => task(e.target, createDraft);
+  $('#insights-unhide').onclick = e => task(e.target, async () => renderInsights((await api('insights/unhide', {})).insights));
+  $('#insights-reset').onclick = e => {
+    if (!confirm('Clear every analyzed job and hidden skill from Insights? Your profile is not changed.')) return;
+    task(e.target, async () => {renderInsights((await api('insights/reset', {})).insights); notify('Insights reset.');});
+  };
 }
 async function importProject() {
   imported = await api('import', {url: $('#github-url').value, jd: $('#jd').value});

@@ -8,6 +8,7 @@ import json
 import secrets
 import shutil
 import threading
+import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,7 @@ from .tailor import tailor
 from .workspace import build_preview, export_preview
 from .render import RenderError
 from .folders import choose_folder
+from .insights import Insights, add_skill
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -32,6 +34,7 @@ class App:
         self.root = Path(root)
         self.store = Store(root)
         self.credentials = CredentialStore(root, include_env=include_env)
+        self.insights = Insights(root)
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
@@ -84,6 +87,22 @@ class App:
                 return self.credentials.public(self.store.settings()['model'])
             if path == '/api/settings':
                 return self.store.save_settings(body)
+            if path.startswith('/api/insights/'):
+                if path == '/api/insights/add':
+                    if not self.store.profile_path.exists():
+                        raise ValueError('Save your own profile before adding skills.')
+                    profile = add_skill(self.store.profile(), body.get('skill'), body.get('group'))
+                    self.store.save_profile(profile)
+                elif path == '/api/insights/hide':
+                    self.insights.hide(text(body.get('skill'), 'Skill', 100, True))
+                elif path == '/api/insights/unhide':
+                    self.insights.unhide_all()
+                elif path == '/api/insights/reset':
+                    self.insights.reset()
+                else:
+                    raise ValueError('Unknown insights action.')
+                profile = self.store.profile()
+                return {'profile': profile, 'insights': self.insights.summary(profile)}
             if path == '/api/import':
                 jd = text(body.get('jd', ''), 'Job description', 30000)
                 evidence = fetch_repository(body.get('url'))
@@ -152,6 +171,10 @@ class App:
             from .llm_tailor import tailor_llm
             data, report = tailor_llm(profile, jd, model=settings['model'])
         rewritten, notice = rewrite_projects(data, jd, settings)
+        try:
+            self.insights.record(jd, report.get('matched_skills', []) + report.get('gap_skills', []))
+        except (OSError, ValueError):
+            notice += ' Skill insights could not be saved for this job.'
         if report.get('tailorer') == 'rules' and settings['tailorer'] == 'auto':
             notice += ' Project selection used the rules fallback.'
         now = time.monotonic()
@@ -198,6 +221,12 @@ def handler(app):
                         return self.reply(200, app.state())
                 except (ValueError, OSError) as e:
                     return self.reply(400, {'error': str(e)})
+            if path == '/api/insights':
+                try:
+                    with app.lock:
+                        return self.reply(200, app.insights.summary(app.store.profile()))
+                except (ValueError, OSError) as e:
+                    return self.reply(400, {'error': str(e)})
             if path.startswith('/api/pdf/'):
                 parts = path.split('/')
                 try:
@@ -236,6 +265,8 @@ def handler(app):
             except (ValueError, OSError) as e:
                 return self.reply(400, {'error': str(e)})
             except Exception:
+                # The terminal is local; the browser still never sees internals.
+                traceback.print_exc()
                 return self.reply(500, {'error': 'The operation failed. Your saved profile is unchanged. Check your tools and settings and retry.'})
     return Handler
 
