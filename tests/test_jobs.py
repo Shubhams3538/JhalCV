@@ -11,6 +11,17 @@ from resume.jobs.fetch import FetchError, check_url, page_with_links
 from resume.jobs.service import JobService, title_matches
 from resume.jobs.store import JobStore
 
+# Tests use fake hosts; never launch the real browser unless a test asks for it.
+_no_browser = patch('resume.jobs.sources.browser', return_value=None)
+
+
+def setUpModule():
+    _no_browser.start()
+
+
+def tearDownModule():
+    _no_browser.stop()
+
 
 def job(ext, title='Software Engineer', reqs='Bachelor degree. 3+ years of software development experience.'):
     return {'external_id': ext, 'title': title, 'location': 'Bengaluru', 'url': f'https://x.test/{ext}',
@@ -47,6 +58,42 @@ class DetectAndFetchTests(unittest.TestCase):
 
 
 class ReaderTests(unittest.TestCase):
+    @patch('resume.jobs.sources.get_json')
+    def test_lever_preserves_explicit_country_for_city_only_locations(self, fetch):
+        fetch.return_value = [{'id': 'in', 'text': 'Engineer', 'categories': {'location': 'Bengaluru'}, 'country': 'IN'},
+                              {'id': 'us', 'text': 'Engineer', 'categories': {'location': 'San Francisco'}, 'country': 'US'}]
+        jobs = sources.lever('https://jobs.lever.co/example')
+        self.assertEqual([j['location'] for j in jobs], ['Bengaluru, India', 'San Francisco'])
+
+    @patch('resume.jobs.sources.get_json')
+    def test_ashby_preserves_country_and_secondary_offices(self, fetch):
+        fetch.return_value = {'jobs': [{'id': '1', 'title': 'Engineer', 'location': 'Bengaluru',
+            'address': {'postalAddress': {'addressCountry': 'IND'}},
+            'secondaryLocations': [{'location': 'San Francisco', 'address': {'postalAddress': {'addressCountry': 'USA'}}}]}]}
+        job = sources.ashby('https://jobs.ashbyhq.com/example')[0]
+        self.assertEqual(job['location'], 'Bengaluru, India; San Francisco')
+
+    @patch('resume.jobs.sources.post_json')
+    def test_workday_preserves_verified_selected_country_from_nested_facets(self, fetch):
+        fetch.return_value = {'total': 1, 'jobPostings': [{'title': 'Engineer', 'locationsText': 'Bangalore',
+            'externalPath': '/job/Bangalore/Engineer_123', 'postedOn': 'Posted Today'}],
+            'facets': [{'facetParameter': 'locationMainGroup', 'values': [
+                {'facetParameter': 'locationCountry', 'values': [{'id': 'india-id', 'descriptor': 'India'}]}]}]}
+        job = sources.workday('https://example.wd5.myworkdayjobs.com/Careers?locationCountry=india-id')[0]
+        self.assertEqual(job['location'], 'Bangalore, India')
+        self.assertEqual(fetch.call_args.args[1]['appliedFacets'], {'locationCountry': ['india-id']})
+        mixed = sources.workday('https://example.wd5.myworkdayjobs.com/Careers?locationCountry=india-id&locationCountry=us-id')[0]
+        self.assertEqual(mixed['location'], 'Bangalore')
+
+    @patch('resume.jobs.sources.post_json')
+    def test_workday_keeps_verified_country_on_later_pages_without_facets(self, fetch):
+        fetch.side_effect = [
+            {'total': 2, 'jobPostings': [{'title': 'A', 'externalPath': '/job/A_1', 'locationsText': 'Bangalore'}],
+             'facets': [{'facetParameter': 'locationCountry', 'values': [{'id': 'in', 'descriptor': 'India'}]}]},
+            {'total': 2, 'jobPostings': [{'title': 'B', 'externalPath': '/job/B_2', 'locationsText': 'Noida'}]}]
+        jobs = sources.workday('https://example.wd5.myworkdayjobs.com/Careers?locationCountry=in')
+        self.assertEqual([j['location'] for j in jobs], ['Bangalore, India', 'Noida, India'])
+
     @patch('resume.jobs.sources.get_json')
     def test_amazon_uses_json_endpoint_and_renames_filters(self, get_json):
         get_json.return_value = {'hits': 1, 'jobs': [{'id_icims': '42', 'title': 'SDE', 'normalized_location': 'Bengaluru, IND',
@@ -204,6 +251,31 @@ class StoreAndServiceTests(unittest.TestCase):
         self.assertIn('2 matching job(s), 2 new', summary)
         verdicts = {j['title']: j['eligible'] for j in self.service.store.jobs()}
         self.assertEqual(verdicts, {'Software Engineer': 'yes', 'Backend Engineer': 'no'})
+
+    def test_partial_refresh_reads_and_checks_only_chosen_sources(self):
+        acme = self.service.add_source('Acme', 'https://job-boards.greenhouse.io/acme')
+        other = self.service.add_source('Other', 'https://job-boards.greenhouse.io/other')
+        boards = {'acme': [job('a1')], 'other': [job('o1')]}
+        reads = []
+
+        def reader(url):
+            name = url.rsplit('/', 1)[-1]
+            reads.append(name)
+            return boards[name]
+
+        profile = {'experience': [{'start': 'Jan 2024', 'end': 'Jun 2026'}]}
+        with patch.dict(sources.READERS, {'greenhouse': reader}), patch('resume.jobs.agents.shutil.which', return_value=None):
+            self.service.refresh(profile, lambda m: None)
+            boards['other'].append(job('o2'))
+            boards['acme'].append(job('a2'))
+            reads.clear()
+            summary = self.service.refresh(profile, lambda m: None, source_ids={other['id']})
+        self.assertEqual(reads, ['other'])
+        self.assertTrue(summary.startswith('Other: 2 matching job(s), 1 new'))
+        by_ext = {j['url'].rsplit('/', 1)[-1]: j for j in self.service.store.jobs()}
+        self.assertEqual(set(by_ext), {'a1', 'o1', 'o2'})  # Acme's new job was not fetched
+        self.assertIsNotNone(by_ext['o2']['eligible'])
+        self.assertEqual(self.service.store.sources()[0]['id'], acme['id'])
 
     def test_location_filter_excludes_other_countries_and_preserves_applied(self):
         src = self.service.add_source('Acme', 'https://job-boards.greenhouse.io/acme', locations='India')
@@ -623,6 +695,51 @@ class SimplifiedJobCategoriesTests(unittest.TestCase):
         url='https://search.jobs.barclays/job/pune/engineer/1'
         self.assertEqual(sources.page_detail({'needs_detail':url})['posted'],'2026-08-31')
         self.assertEqual(sources.page_jobs(url,lambda p,s:{})[0]['posted'],'2026-08-31')
+
+
+class BrowserRenderTests(unittest.TestCase):
+    LISTING = ('<main>' + 'Open roles. ' * 30 + '<a href="/profile/job_details/11">WhatsApp - Software Engineer - iOS'
+               '<div>Bangalore, India</div></a></main>')
+    DETAIL = ('<script type="application/ld+json">' + json.dumps({
+        '@type': 'JobPosting', 'title': 'WhatsApp - Software Engineer - iOS', 'datePosted': '2026-10-16T04:54:43-07:00',
+        'description': 'Build WhatsApp.', 'responsibilities': 'Ship iOS features.',
+        'qualifications': '2+ years of programming experience.',
+        'jobLocation': [{'@type': 'Place', 'name': 'Bangalore, India'}]}) + '</script>')
+
+    def test_listing_falls_back_to_the_browser_when_plain_request_fails(self):
+        ask = lambda prompt, schema: {'note': '', 'jobs': [{'title': 'WhatsApp - Software Engineer - iOS', 'location': 'Bangalore, India',
+                                                            'url': 'https://www.metacareers.com/profile/job_details/11', 'posted': ''}]}
+        with patch('resume.jobs.sources.browser', return_value='/chrome'), \
+                patch('resume.jobs.sources.get_text', side_effect=FetchError('The site returned HTTP 400.')), \
+                patch('resume.jobs.sources.render_page', return_value=self.LISTING) as render:
+            jobs = sources.page_jobs('https://www.metacareers.com/jobsearch/?q=india', ask)
+        render.assert_called_once()
+        self.assertEqual(jobs[0]['url'], 'https://www.metacareers.com/profile/job_details/11')
+
+    def test_listing_without_structured_data_is_rendered(self):
+        ask = lambda prompt, schema: {'note': '', 'jobs': [{'title': 'WhatsApp - Software Engineer - iOS', 'location': '',
+                                                            'url': 'https://www.metacareers.com/profile/job_details/11', 'posted': ''}]}
+        with patch('resume.jobs.sources.browser', return_value='/chrome'), \
+                patch('resume.jobs.sources.get_text', return_value='<div id="root"></div>' + 'x' * 600), \
+                patch('resume.jobs.sources.render_page', return_value=self.LISTING) as render:
+            self.assertEqual(len(sources.page_jobs('https://www.metacareers.com/jobsearch/', ask)), 1)
+        render.assert_called_once()
+
+    def test_detail_reads_rendered_structured_posting(self):
+        with patch('resume.jobs.sources.browser', return_value='/chrome'), \
+                patch('resume.jobs.sources.get_text', return_value='<html>Log in</html>'), \
+                patch('resume.jobs.sources.render_page', return_value=self.DETAIL):
+            detail = sources.page_detail({'needs_detail': 'https://www.metacareers.com/profile/job_details/11'})
+        self.assertEqual(detail['posted'], '2026-10-16')
+        self.assertEqual(detail['requirements'], '2+ years of programming experience.')
+        self.assertIn('Ship iOS features.', detail['description'])
+
+    def test_static_structured_pages_skip_the_browser(self):
+        with patch('resume.jobs.sources.browser', return_value='/chrome'), \
+                patch('resume.jobs.sources.get_text', return_value=self.DETAIL), \
+                patch('resume.jobs.sources.render_page') as render:
+            sources.page_detail({'needs_detail': 'https://careers.x.test/job/11'})
+        render.assert_not_called()
 
 
 if __name__ == '__main__':

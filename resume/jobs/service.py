@@ -11,6 +11,7 @@ from .agents import Agents, AgentError, NAMES
 from .fetch import FetchError, check_url
 from .store import JobStore, location_matches
 from .freshness import freshness, newest_first
+from .imports import MAX_ROWS, preview_csv, validate_entry
 
 MAX_DETAILS = 40     # detail pages fetched per source per run (new jobs only)
 MAX_CHECKS = 120     # experience checks per run
@@ -30,6 +31,8 @@ class JobService:
     def __init__(self, root):
         self.root = Path(root)
         self.store = JobStore(root)
+        from ..usage import UsageStore
+        self.usage = UsageStore(root)
         self.lock_path = self.root / '.local' / 'jobs.lock'
         self.progress = {'running': False, 'message': '', 'finished_at': None, 'error': None}
         self._guard = threading.Lock()
@@ -70,18 +73,32 @@ class JobService:
     def set_source_locations(self, ident, value) -> None:
         self.store.set_source_locations(ident, self._locations(value))
 
+    def preview_sources(self, content):
+        return preview_csv(content, self.store.sources())
+
+    def import_sources(self, rows, locations='India'):
+        if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_ROWS:
+            raise ValueError(f'Choose between 1 and {MAX_ROWS} companies to import.')
+        entries = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError('Each company must have a company name and URL.')
+            entry = validate_entry(row.get('company'), row.get('url'))
+            entries.append({**entry, 'kind': sources.detect(entry['url'])})
+        return self.store.import_sources(entries, self._locations(locations))
+
     # refresh
-    def start(self, profile: dict, recheck_only=False) -> bool:
+    def start(self, profile: dict, recheck_only=False, source_ids=None) -> bool:
         with self._guard:
             if self.progress['running']:
                 return False
             self.progress = {'running': True, 'message': 'Starting…', 'finished_at': None, 'error': None}
-        threading.Thread(target=self._background, args=(profile, recheck_only), daemon=True).start()
+        threading.Thread(target=self._background, args=(profile, recheck_only, source_ids), daemon=True).start()
         return True
 
-    def _background(self, profile, recheck_only):
+    def _background(self, profile, recheck_only, source_ids):
         try:
-            summary = self.refresh(profile, self._say, recheck_only=recheck_only)
+            summary = self.refresh(profile, self._say, recheck_only=recheck_only, source_ids=source_ids)
             self.progress.update(running=False, message=summary, finished_at=int(time.time()))
         except Exception as e:  # reported in the UI, never raised into the server
             self.progress.update(running=False, message='', error=str(e) or 'The refresh failed.',
@@ -90,7 +107,10 @@ class JobService:
     def _say(self, message):
         self.progress['message'] = message
 
-    def refresh(self, profile: dict, say=print, *, recheck_only=False) -> str:
+    def refresh(self, profile: dict, say=print, *, recheck_only=False, source_ids=None) -> str:
+        """Refresh every source, or only `source_ids` when given. Experience and
+        relevance checks then cover only the refreshed sources' jobs, so a
+        partial refresh never spends agent usage on other companies."""
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -103,11 +123,12 @@ class JobService:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise RuntimeError('Another job refresh is already running.') from None
-            agents = Agents()
+            agents = Agents(usage_store=self.usage)
             found = new = 0
             failures = []
+            chosen = [s for s in self.store.sources() if source_ids is None or s['id'] in source_ids]
             if not recheck_only:
-                for src in self.store.sources():
+                for src in chosen:
                     say(f'Reading {src["name"]}…')
                     attempted = set()
                     try:
@@ -172,12 +193,13 @@ class JobService:
 
             self.store.prune_old()
             years = self.experience_years(profile)['years']
-            todo = self.store.unchecked(MAX_CHECKS)
+            todo = self.store.unchecked(MAX_CHECKS, None if source_ids is None else {s['id'] for s in chosen})
             if todo:
                 say(f'Checking relevance and experience for {len(todo)} job(s)…')
                 self.store.set_eligibility(eligibility.check(todo, years, agents))
             self.store.set_meta('last_refresh', int(time.time()))
-            parts = [] if recheck_only else [f'{found} matching job(s), {new} new']
+            scope = '' if source_ids is None else ', '.join(s['name'] for s in chosen) + ': '
+            parts = [] if recheck_only else [f'{scope}{found} matching job(s), {new} new']
             if todo:
                 parts.append(f'{len(todo)} checked by ' + (', '.join(NAMES[a] for a in agents.used) or 'text rules'))
             if failures:

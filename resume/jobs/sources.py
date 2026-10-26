@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .freshness import freshness, newest_first
-from .fetch import FetchError, get_json, get_text, html_to_text, page_with_links, post_json
+from .fetch import FetchError, browser, get_json, get_text, html_to_text, page_with_links, post_json, render_page
 
 # Paginated sites stop here; whole-board APIs return everything and the
 # title filters are applied before the same cap.
@@ -70,6 +70,28 @@ def _job(external_id, title, location='', url='', posted='', requirements='', de
     return {'external_id': str(external_id), 'title': ' '.join(str(title or '').split())[:300],
             'location': ' '.join(str(location or '').split())[:300], 'url': url, 'posted': posted,
             'requirements': requirements[:20000], 'description': description[:30000]}
+
+
+def _with_country(location, country):
+    """Keep explicit feed country data when the display location is city-only."""
+    location = str(location or '')
+    if str(country or '').casefold() in ('in', 'ind', 'india') and not re.search(r'\bindia\b', location, re.I):
+        return f'{location}, India' if location else 'India'
+    return location
+
+
+def _workday_india_filter(facets, selected):
+    for facet in facets:
+        param = facet.get('facetParameter', '')
+        selected_ids = set(selected.get(param, []))
+        india_ids = {value.get('id') for value in facet.get('values') or []
+                     if value.get('descriptor', '').casefold() == 'india'}
+        if re.search('location|country', param, re.I) and selected_ids and selected_ids <= india_ids:
+            return True
+        for value in facet.get('values') or []:
+            if _workday_india_filter([value], selected):
+                return True
+    return False
 
 
 # ── Amazon: the search page's own JSON endpoint, same query parameters ────
@@ -157,13 +179,14 @@ def workday(url: str) -> list[dict]:
             search = v
         else:
             facets.setdefault(k, []).append(v)
-    jobs, offset = [], 0
+    jobs, offset, india = [], 0, False
     while len(jobs) < MAX_JOBS:
         data = post_json(base + '/jobs', {'appliedFacets': facets, 'limit': 20, 'offset': offset, 'searchText': search})
         batch = data.get('jobPostings') or []
+        india = india or _workday_india_filter(data.get('facets') or [], facets)
         for j in batch:
             path = j.get('externalPath') or ''
-            item = _job(path.rsplit('_', 1)[-1] or path, j.get('title'), j.get('locationsText'),
+            item = _job(path.rsplit('_', 1)[-1] or path, j.get('title'), _with_country(j.get('locationsText'), 'India' if india else ''),
                         f'https://{parts.hostname}{parts.path.rstrip("/")}{path[path.find("/job/"):] if "/job/" in path else path}',
                         _date(j.get('postedOn')))
             item['needs_detail'] = base + path
@@ -206,7 +229,7 @@ def lever(url: str) -> list[dict]:
     for j in get_json(f'https://{api}/v0/postings/{company}?mode=json') or []:
         lists = '\n'.join(f"{l.get('text', '')}\n{html_to_text(l.get('content', ''))}" for l in j.get('lists') or [])
         text = '\n\n'.join(x for x in (j.get('descriptionPlain') or '', lists, j.get('additionalPlain') or '') if x)
-        out.append(_job(j.get('id'), j.get('text'), (j.get('categories') or {}).get('location'), j.get('hostedUrl') or '',
+        out.append(_job(j.get('id'), j.get('text'), _with_country((j.get('categories') or {}).get('location'), j.get('country')), j.get('hostedUrl') or '',
                         _date(j.get('createdAt')), lists or text, text))
     return out
 
@@ -217,7 +240,12 @@ def ashby(url: str) -> list[dict]:
     out = []
     for j in data.get('jobs') or []:
         text = j.get('descriptionPlain') or html_to_text(j.get('descriptionHtml') or '')
-        out.append(_job(j.get('id'), j.get('title'), j.get('location'), j.get('jobUrl') or '',
+        country = ((j.get('address') or {}).get('postalAddress') or {}).get('addressCountry')
+        location = _with_country(j.get('location'), country)
+        secondary = [_with_country(place.get('location'), ((place.get('address') or {}).get('postalAddress') or {}).get('addressCountry'))
+                     for place in j.get('secondaryLocations') or [] if isinstance(place, dict)]
+        location = '; '.join(dict.fromkeys(value for value in [location, *secondary] if value))
+        out.append(_job(j.get('id'), j.get('title'), location, j.get('jobUrl') or '',
                         _date(j.get('publishedAt')), text, text))
     return out
 
@@ -241,13 +269,26 @@ def _json_ld_jobs(page: str, base: str) -> list[dict]:
             continue
         for item in data if isinstance(data, list) else data.get('@graph', [data]) if isinstance(data, dict) else []:
             if isinstance(item, dict) and item.get('@type') == 'JobPosting':
-                place = item.get('jobLocation') or {}
-                place = place[0] if isinstance(place, list) and place else place
-                address = (place.get('address') or {}) if isinstance(place, dict) else {}
-                location = ', '.join(x for x in (address.get('addressLocality'), address.get('addressCountry')) if isinstance(x, str))
-                text = html_to_text(item.get('description') or '')
+                places = item.get('jobLocation') or []
+                places = places if isinstance(places, list) else [places]
+                names = []
+                for place in places:
+                    if not isinstance(place, dict):
+                        continue
+                    address = place.get('address') if isinstance(place.get('address'), dict) else {}
+                    name = place.get('name') if isinstance(place.get('name'), str) else ''
+                    name = name or ', '.join(x for x in (address.get('addressLocality'), address.get('addressCountry'))
+                                             if isinstance(x, str))
+                    if name and name not in names:
+                        names.append(name)
+                field = lambda key: html_to_text(item[key]) if isinstance(item.get(key), str) else ''
+                about, duties = field('description'), field('responsibilities')
+                quals = '\n'.join(x for x in (field('qualifications'), field('experienceRequirements')) if x)
+                description = '\n\n'.join(x for x in (about, duties and 'Responsibilities\n' + duties,
+                                                     quals and 'Qualifications\n' + quals) if x)
                 jobs.append(_job(item.get('identifier', {}).get('value') if isinstance(item.get('identifier'), dict) else item.get('url') or item.get('title'),
-                                 item.get('title'), location, item.get('url') or base, _date(item.get('datePosted')), text, text))
+                                 item.get('title'), '; '.join(names), item.get('url') or base, _date(item.get('datePosted')),
+                                 quals or description, description))
     return jobs
 
 
@@ -262,9 +303,23 @@ def _embedded_greenhouse(page: str) -> str:
     return ''
 
 
+def _page(url: str) -> tuple[str, bool]:
+    """(html, rendered). A plain request first; the browser when that fails."""
+    try:
+        return get_text(url), False
+    except FetchError:
+        if not browser():
+            raise
+    return render_page(url), True
+
+
 def page_jobs(url: str, ask) -> list[dict]:
     """`ask(prompt, schema)` runs an agent and returns its JSON answer."""
-    page = get_text(url)
+    page, rendered = _page(url)
+    if not rendered and not _embedded_greenhouse(page) and not _json_ld_jobs(page, url) and browser():
+        # Nothing structured in the raw HTML: the listings are most likely
+        # added by JavaScript, so read the page as a browser would.
+        page, rendered = render_page(url), True
     board = _embedded_greenhouse(page)
     if board:
         return greenhouse(f'https://job-boards.greenhouse.io/{board}')
@@ -311,8 +366,11 @@ def _barclays_date(value: str, url: str) -> str:
 
 
 def page_detail(item: dict) -> dict:
-    page = get_text(item['needs_detail'])
+    page, rendered = _page(item['needs_detail'])
     structured = _json_ld_jobs(page, item['needs_detail'])
+    if len(structured) != 1 and not rendered and browser():
+        page = render_page(item['needs_detail'])
+        structured = _json_ld_jobs(page, item['needs_detail'])
     text = html_to_text(page)
     result = ({k: structured[0][k] for k in ('requirements', 'description', 'posted')}
               if len(structured) == 1 else {'requirements': text[:20000], 'description': text[:30000]})

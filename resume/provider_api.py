@@ -100,13 +100,22 @@ def send(url, headers, body, timeout):
 
 
 def call(route, prompt, schema, system, temperature, schema_name, timeout):
+    from .usage import record_api
     url, headers, body = request_shape(route, prompt, schema, system, temperature, schema_name)
+    def measured_send():
+        try:
+            response = send(url, headers, body, timeout)
+        except LLMError:
+            record_api(route['provider'], route['model'], {})
+            raise
+        record_api(route['provider'], route['model'], response)
+        return response
     try:
-        response = send(url, headers, body, timeout)
+        response = measured_send()
     except LLMError as e:
         if e.status == 400 and e.body == 'unsupported temperature' and 'temperature' in body:
             body.pop('temperature')
-            response = send(url, headers, body, timeout)
+            response = measured_send()
         else:
             raise
     try:

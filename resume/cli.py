@@ -7,6 +7,9 @@ import json
 import re
 import sys
 from datetime import date
+from functools import wraps
+
+from .usage import UsageStore, usage_scope
 from pathlib import Path
 
 from .render import fit, RenderError
@@ -23,6 +26,15 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40]
 
 
+def _accounted(function):
+    @wraps(function)
+    def run(args):
+        with usage_scope(UsageStore(ROOT), 'resume CLI'):
+            return function(args)
+    return run
+
+
+@_accounted
 def cmd_make(args) -> int:
     profile = json.loads(Path(args.profile).read_text())
     jd_path = Path(args.jd)
@@ -145,6 +157,7 @@ def cmd_check(args) -> int:
 
 
 
+@_accounted
 def cmd_lock(args) -> int:
     """Prove the frozen sections are identical across every JD in jds/."""
     import hashlib
@@ -186,6 +199,7 @@ def cmd_lock(args) -> int:
 
 
 
+@_accounted
 def cmd_compare(args) -> int:
     """Run both JD parsers on the same job description, side by side."""
     from .tailor import parse_jd as parse_rules

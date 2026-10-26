@@ -27,6 +27,7 @@ from .render import RenderError
 from .folders import choose_folder
 from .insights import Insights, add_skill
 from .jobs.service import JobService
+from .usage import usage_scope
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -39,6 +40,7 @@ class App:
         self.credentials = CredentialStore(root, include_env=include_env)
         self.insights = Insights(root)
         self.jobs = JobService(root)
+        self.usage = self.jobs.usage
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
@@ -53,7 +55,9 @@ class App:
                 'token': self.token}
 
     def post(self, path, body):
-        with self.lock:
+        with self.lock, usage_scope(self.usage, 'resume'):
+            if path == '/api/usage/settings':
+                return self.usage.set_reference(body.get('model'))
             if path == '/api/profile':
                 # A tab sends the revision it loaded, so an old tab cannot
                 # silently overwrite edits made elsewhere. Bare profiles are
@@ -170,14 +174,26 @@ class App:
             return {key: job[key] for key in ('id', 'title', 'company', 'location', 'url', 'description')}
         if path == '/api/jobs/sources/add':
             self.jobs.add_source(body.get('name'), body.get('url'), body.get('include', ''), body.get('exclude', ''), body.get('locations', ''))
+        elif path == '/api/jobs/sources/preview':
+            return self.jobs.preview_sources(body.get('csv'))
+        elif path == '/api/jobs/sources/import':
+            result = self.jobs.import_sources(body.get('rows'), body.get('locations', 'India'))
+            return {**result, 'state': self.jobs.state(profile)}
         elif path == '/api/jobs/sources/locations':
             self.jobs.set_source_locations(ident(), body.get('locations', ''))
         elif path == '/api/jobs/sources/remove':
             self.jobs.store.remove_source(ident())
         elif path == '/api/jobs/refresh':
-            if not self.jobs.store.sources():
+            known = {s['id'] for s in self.jobs.store.sources()}
+            if not known:
                 raise ValueError('Add a careers page first.')
-            if not self.jobs.start(profile):
+            chosen = body.get('sources')
+            if chosen is not None:
+                if (not isinstance(chosen, list) or not chosen
+                        or any(type(x) is not int or x not in known for x in chosen)):
+                    raise ValueError('Choose at least one of your saved companies to refresh.')
+                chosen = set(chosen)
+            if not self.jobs.start(profile, source_ids=chosen):
                 raise ValueError('A refresh is already running.')
         elif path == '/api/jobs/recheck':
             if not self.jobs.start(profile, recheck_only=True):
@@ -287,6 +303,11 @@ def handler(app):
                         return self.reply(200, app.state())
                 except (ValueError, OSError) as e:
                     return self.reply(400, {'error': str(e)})
+            if path == '/api/usage':
+                try:
+                    return self.reply(200, app.usage.summary())
+                except (sqlite3.Error, OSError):
+                    return self.reply(503, {'error': 'Usage accounting is currently unavailable.'})
             if path == '/api/jobs':
                 try:
                     return self.reply(200, app.jobs.state(app.store.profile()))
