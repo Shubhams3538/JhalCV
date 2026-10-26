@@ -1,6 +1,6 @@
 # JhalCV handoff
 
-Updated October 24, 2026. Branch: `v2`. The user requested the accompanying commit be dated October 25, 2026. Do not push unless asked.
+Updated October 24, 2026. Branch: `jobs`. The user requested the accompanying commit be dated October 25, 2026. Do not push unless asked.
 
 ## Product and preferences
 
@@ -31,9 +31,16 @@ The user wants implementation without code walkthroughs. Read `AGENTS.local.md`;
 
 - Jobs page: the user adds careers URLs with filters already applied, plus optional title include/exclude keywords. Data lives in `.local/jobs.db` (SQLite).
 - Readers in `resume/jobs/sources.py`: Google Careers (embedded `ds:1` data), Amazon (`search.json`, with `country[]` renamed to `normalized_country_code[]`), Workday CXS API, Greenhouse, Lever, Ashby. Any other page is read by an agent from page text; only links that exist on the page are kept (first results page only).
-- Experience check (`resume/jobs/eligibility.py`): batches of 8 jobs sent to Codex first, then Claude Code (`resume/jobs/agents.py`), on the user's subscriptions. Agents run in an empty temp folder with no tools, and API-key env vars are removed. If both fail, a text-rule fallback runs. The years default to the profile dates and can be overridden.
+- Custom career pages that embed a Greenhouse job-board script (e.g. Tower Research Capital `/roles/`) resolve its board token and read the full Greenhouse feed directly, without an AI page-reader call. The remaining generic page reader still covers only the supplied page, not pagination links.
+- Each saved source has an editable comma-separated location filter, independent of its URL and title filters. Greenhouse office locations include country when available (e.g. Gurgaon, Haryana, India). Out-of-filter saved jobs are hidden from active lists and AI checks, while Applied jobs remain visible. Multi-office jobs show only matching locations in a filtered view. Needs review and Old drawers appear only with the default Eligible tab. Tower source is set to India only per user.
+- Relevance and experience check (`resume/jobs/eligibility.py`): batches of 8 jobs sent to Codex first, then Claude Code (`resume/jobs/agents.py`), on the user's subscriptions. Agents run in an empty temp folder with no tools, and API-key env vars are removed. If both fail, a text-rule fallback runs. The years default to the profile dates and can be overridden.
 - `python3 -m resume.jobs refresh` runs a refresh from the terminal. Scheduling every 24 to 48 hours is not decided yet.
 - Profile saves now carry a revision, so a stale tab cannot overwrite newer profile edits.
+- Three main Jobs tabs: Eligible (default), Not eligible, and Applied. Needs review and Old are collapsed sections. Jobs dated today through seven calendar days ago qualify for the first two tabs when verdicts are clear; eight-day-old unapplied jobs move to Old, and unapplied jobs are deleted once posting age exceeds eight days. Applied jobs remain until explicitly deleted. Invalid, future, missing-date, and uncertain jobs go to Needs review. Individual and category Delete retain minimal source/external-ID tombstones to prevent recollection. Age cleanup runs on Jobs state load and refresh, not while the app is closed.
+- Google/Amazon request newest sorting; Greenhouse update timestamps never count as posting dates. Old Greenhouse saved dates are quarantined on schema migration until refreshed. Workday relative dates and detail-page dates are supported. Barclays visible "Date live" takes precedence over conflicting structured dates. Saved URLs missing dates are retried independently of listing success, with oldest-attempt rotation and a bounded detail budget. Expired new arrivals are tombstoned so they cannot consume that budget repeatedly.
+- Broad software/adjacent-role relevance shares the existing batch experience call. Clearly unrelated jobs move to Not relevant; ambiguous roles are retained. Decisions persist for unchanged content, and changed duties/qualifications trigger rechecking. Failed/deferred detail reads retry next refresh.
+- User direction: downloadable local-first app, own data/subscriptions; make it reliable for this user before adding role-selection menus or public onboarding. No hosted platform planned now.
+
 
 ## Private data and validation
 
@@ -46,3 +53,9 @@ Run the suite with `python3 -m unittest discover -s tests -v`.
 ## Future idea
 
 A Chrome extension could send selected JD text through a right-click action to JhalCV and generate the current resume in the designated folder. This is an agreed future direction, not implemented yet.
+
+Freshness/relevance/navigation/persistence verification: 125 unit tests pass; isolated browser checks verified all three tabs, collapsed Needs review/Old sections, eight-day Old placement, nine-day cleanup, and Applied retention. A live Tower board read returned 100 jobs, including five within seven days. A live Codex batch retained two unusually titled software roles and rejected recruiting work.
+
+Navigation uses URL hashes for the active page and Jobs subtab (e.g. `#jobs/applied`), restoring them on reload and browser back/forward. No framework migration: keep vanilla JavaScript + Python while making the personal local workflow reliable.
+
+Dark theme is the default. Header toggle remembers light/dark in localStorage (`jhalcv-theme`). `/theme.js` runs before CSS, stays within CSP, and works independently of API startup. PDF contents are not inverted or recolored.

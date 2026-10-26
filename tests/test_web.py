@@ -74,6 +74,50 @@ class WebTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             self.request('/api/jobs/status', {'id': ident, 'status': 'deleted'}, headers)
 
+    def test_saved_source_location_filter_updates_without_removing_applied_jobs(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme',
+                                                       'locations': 'India'}, headers)
+        source = state['sources'][0]
+        self.assertEqual(source['locations'], 'India')
+        rows = [dict(external_id=str(i), title='Engineer', location=place,
+                     url=f'https://x.test/{i}', posted='', requirements='', description='')
+                for i, place in [(1, 'Gurgaon, Haryana, India'), (2, 'Singapore')]]
+        ids = self.app.jobs.store.save_listing(source['id'], rows)
+        self.assertEqual([j['id'] for j in self.request('/api/jobs')['jobs']], [ids[0]])
+        self.request('/api/jobs/status', {'id': ids[1], 'status': 'applied'}, headers)
+        state = self.request('/api/jobs/sources/locations', {'id': source['id'], 'locations': 'Singapore'}, headers)
+        self.assertEqual(state['sources'][0]['locations'], 'Singapore')
+        self.assertEqual({j['id'] for j in state['jobs']}, {ids[1]})
+
+    def test_saved_job_delete_endpoint_prevents_recollection(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        store = self.app.jobs.store
+        source = store.add_source('Acme', 'https://x.test/jobs', 'greenhouse')
+        item = dict(external_id='1', title='Engineer', location='India', url='https://x.test/job/1',
+                    posted='', requirements='', description='Build software')
+        ident = store.save_listing(source['id'], [item])[0]
+        state = self.request('/api/jobs/delete', {'id': ident}, headers)
+        self.assertEqual(state['jobs'], [])
+        self.assertEqual(store.save_listing(source['id'], [item]), [])
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/delete', {'id': ident}, headers)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/detail', {'id': ident}, headers)
+
+    def test_bulk_delete_keeps_other_categories(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        store = self.app.jobs.store
+        source = store.add_source('Acme', 'https://x.test/jobs', 'greenhouse')
+        items = [dict(external_id=str(i), title='Engineer', location='India', url=f'https://x.test/job/{i}',
+                      posted='', requirements='', description='Build software') for i in (1,2)]
+        ids = store.save_listing(source['id'], items)
+        store.set_status(ids[0], 'applied')
+        state = self.request('/api/jobs/delete-all', {'category':'applied'}, headers)
+        self.assertEqual([j['id'] for j in state['jobs']], [ids[1]])
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/delete-all', {'category':'all'}, headers)
+
     def test_foreign_origin_and_host_are_rejected(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token, 'Origin': 'https://evil.test'}
         with self.assertRaises(urllib.error.HTTPError) as error:
