@@ -29,6 +29,9 @@ The user wants implementation without code walkthroughs. Read `AGENTS.local.md`;
 
 ## Jobs collector (branch `jobs`, in progress)
 
+- October 25 CSV import: Jobs supports UTF-8 `company,url` files (also name/link headers), preview and row selection, 500 rows/500 KB, atomic insertion and duplicate name/canonical URL skipping. India defaults for imported sources. Import never auto-refreshes. The user's 145-company workbook was audited; 76 URLs refined. Deliverables are ignored `build/company-import/india_145_companies.csv` and `portal_link_audit.csv`; 15 portals remain blocked or unverified, listed in the audit. No bulk import was performed in the user's database.
+- Explicit IN/IND country fields from Lever/Ashby and verified India-only Workday facets are retained in location labels. Workday country context survives pagination without facets; mixed-country selections are not relabelled India.
+
 - Jobs page: the user adds careers URLs with filters already applied, plus optional title include/exclude keywords. Data lives in `.local/jobs.db` (SQLite).
 - Readers in `resume/jobs/sources.py`: Google Careers (embedded `ds:1` data), Amazon (`search.json`, with `country[]` renamed to `normalized_country_code[]`), Workday CXS API, Greenhouse, Lever, Ashby. Any other page is read by an agent from page text; only links that exist on the page are kept (first results page only).
 - Custom career pages that embed a Greenhouse job-board script (e.g. Tower Research Capital `/roles/`) resolve its board token and read the full Greenhouse feed directly, without an AI page-reader call. The remaining generic page reader still covers only the supplied page, not pagination links.
@@ -59,3 +62,12 @@ Freshness/relevance/navigation/persistence verification: 125 unit tests pass; is
 Navigation uses URL hashes for the active page and Jobs subtab (e.g. `#jobs/applied`), restoring them on reload and browser back/forward. No framework migration: keep vanilla JavaScript + Python while making the personal local workflow reliable.
 
 Dark theme is the default. Header toggle remembers light/dark in localStorage (`jhalcv-theme`). `/theme.js` runs before CSS, stays within CSP, and works independently of API startup. PDF contents are not inverted or recolored.
+
+## AI usage ledger (October 25)
+
+- `resume/usage.py` persists metadata-only accounting in `.local/usage.db`; API instrumentation runs before structured-answer validation and includes unmeasured failed attempts. Local cache hits do not add tokens/cost.
+- Jobs' `Agents` receives a usage store explicitly (thread-safe scopes inside each invocation); Codex `--json` turn usage and Claude JSON per-model usage/cost are captured, including nonzero exits and partial timeout output. Subscription equivalent is separated from API estimates.
+- `/api/usage` and authenticated `/api/usage/settings` power the new `#usage` view. Codex's unreported actual model is labelled `codex-default`; its selectable valuation reference affects future estimates only. Price snapshot/source links and incomplete accounting warnings are visible.
+- Earlier usage is not recoverable. Unknown models, missing usage and unsupported long-context pricing stay unknown, never silently priced as zero. No reset/delete operation was added.
+
+Usage validation: 155 tests passed, including provider/cache math, failed-call accounting, Claude/Codex parsing, concurrent persistence, CLI coverage and HTTP authentication. Fresh reviewer found no remaining issues after CLI coverage fix. JS syntax and diff checks passed. Live port 8765 smoke verified Usage endpoint/assets and all 147 saved sources. Browser visual inspection was unavailable due preview timeouts; no live provider charges were created for the ledger smoke.

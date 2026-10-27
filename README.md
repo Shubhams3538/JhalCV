@@ -2,7 +2,7 @@
 
 A local resume workspace: paste a job description, import your GitHub projects,
 review concise descriptions, and save a one-page PDF. Everyone runs their own
-copy. There is no central server, account, database, frontend build, or Python
+copy. There is no central server, account, frontend build, or Python
 package installation.
 
 ## Start the browser app
@@ -69,6 +69,24 @@ continues to work without credentials.
    first** to put the most recently saved resume at the top; picker sorting
    remains controlled by your operating system. Native selection uses macOS,
    Windows, or Linux (Zenity/KDialog) dialogs, with manual path entry as fallback.
+
+### Import company career pages
+
+In **Jobs → Import companies CSV**, upload a UTF-8 CSV with two columns:
+
+```csv
+company,url
+Google,https://www.google.com/about/careers/applications/jobs/results/?location=India&sort_by=date
+```
+
+Review the preview and deselect any companies you do not want. Existing company
+names and equivalent URLs are skipped. Invalid rows stay out of the import.
+The limit is 500 companies and 500 KB per file. **India** is the default location
+filter for the imported companies; change it before confirming if needed.
+Importing only saves the sources. Select companies and use **Refresh selected**
+when ready to fetch jobs. Jobs and sources stay in the local `.local/jobs.db`.
+Portal filters are retained, while JhalCV also applies its location and posting-age
+rules. A valid careers link does not guarantee its site can currently be read.
 
 ### Clarity and the page budget
 
@@ -361,3 +379,11 @@ resume/
 
 `needs_verification` fields flag numbers to confirm before sending. They never
 render. Three are outstanding, all on the web server project.
+
+## AI usage and dollar estimates
+
+Open **Usage** in the sidebar to see lifetime/today token counts, cached input, local cache hits, and a provider/model breakdown. Counts persist locally in `.local/usage.db` across app restarts. Tracking begins with this feature; older calls cannot be reconstructed. Only metadata and token/cost counters are saved, never prompts, answers or credentials.
+
+API-key costs use standard text pricing estimates; OpenRouter's reported request charge takes precedence when provided. Codex and Claude Code job calls appear separately as **subscription equivalent**, not an additional subscription bill. Claude's CLI cost is itself an estimate. Credits, free tiers, taxes and subscription fees are excluded. Unknown usage and unpriced models are explicitly marked as partial totals. Local response-cache hits add no new tokens or cost. Failed/malformed answers still count whenever the provider reports usage.
+
+The price snapshot was checked October 25, 2026 against the official [OpenAI](https://developers.openai.com/api/docs/pricing), [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [Gemini](https://ai.google.dev/gemini-api/docs/pricing), and [OpenRouter](https://openrouter.ai/docs/cookbook/administration/usage-accounting) pages. Rates are not refreshed automatically. Codex JSON usage does not report its model; its configurable valuation reference defaults to `gpt-6.1-sol`, verified as this installation's CLI default. Changing that reference affects future valuations only, not the model being run or past records. Unsupported long-context prices remain unpriced. Cache creation uses the default lifetime unless Anthropic reports one-hour creation explicitly. Gemini 3.8 Flash's announced January 2027 rate change is included.
