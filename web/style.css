@@ -958,7 +958,10 @@ dialog small { font-size: 9px; color: var(--muted); }
   border-top:1px solid var(--line)
 }
 #jobs-sources {
-  margin-top:18px
+  margin-top:18px;
+  max-height:560px;
+  overflow:auto;
+  scrollbar-gutter:stable
 }
 .source-info, .job-info {
   display:flex;

@@ -73,6 +73,17 @@ class WebTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 400)
         self.assertEqual(self.app.store.profile()['basics']['name'], 'Changed Elsewhere')
 
+    def test_edit_job_source_link_preserves_saved_jobs(self):
+        source = self.app.jobs.add_source('Acme', 'https://acme.test/careers')
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        result = self.request('/api/jobs/sources/url', {'id': source['id'], 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
+        saved = next(src for src in result['sources'] if src['id'] == source['id'])
+        self.assertEqual(saved['kind'], 'greenhouse')
+        self.assertEqual(saved['original_url'], 'https://acme.test/careers')
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/sources/url', {'id': source['id'], 'url': 'http://127.0.0.1/'}, headers)
+        self.assertEqual(error.exception.code, 400)
+
     def test_jobs_endpoints(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
         state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
