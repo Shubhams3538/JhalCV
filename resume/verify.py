@@ -109,7 +109,7 @@ def verify(pdf: Path, data: dict, *, max_pages: int = 1) -> list[dict]:
     for section in ("experience", "projects"):
         for entry in data.get(section, []):
             for bullet in entry["bullets"]:
-                probe = _norm(bullet)[:45]
+                probe = _norm(bullet.replace("**", ""))[:45]
                 check(probe in flat, "bullet-intact", f"missing/garbled: '{bullet[:50]}...'")
 
     # 5. Skill labels are not glued to their values (the old tabular bug).

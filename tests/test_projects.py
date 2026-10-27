@@ -50,6 +50,19 @@ class DescriptionTests(unittest.TestCase):
 
     @patch('resume.descriptions.llm.have_key', return_value=True)
     @patch('resume.descriptions.llm.ask')
+    def test_rewrites_must_keep_bold_phrases(self, ask, _):
+        data = copy.deepcopy(self.data)
+        data['projects'][0]['bullets'] = ['Built an **HTTP server** with a fixed **worker pool** today.',
+                                          'Used **sockets** to handle incoming HTTP requests quickly.']
+        ask.return_value = ({'projects': [{'bullets': ['Built an **HTTP server** with a **worker pool**.',
+                                                       'Used sockets to handle HTTP requests.']}]}, False)
+        result, notice = rewrite_projects(data, 'Backend role', SETTINGS)
+        self.assertEqual(result['projects'][0]['bullets'],
+                         ['Built an **HTTP server** with a **worker pool**.', data['projects'][0]['bullets'][1]])
+        self.assertIn('Kept 1 original', notice)
+
+    @patch('resume.descriptions.llm.have_key', return_value=True)
+    @patch('resume.descriptions.llm.ask')
     def test_valid_rewrites_only_change_project_bullets(self, ask, _):
         ask.return_value = ({'projects': [{'bullets': ['Built an HTTP server with worker pooling.', 'Handled HTTP requests using sockets.']}]}, False)
         result, _ = rewrite_projects(self.data, 'Backend server job', SETTINGS)

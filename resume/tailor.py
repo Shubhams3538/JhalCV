@@ -141,6 +141,10 @@ def parse_jd(jd_text: str, profile: dict) -> dict:
 
 MIN_SHIPPED_BULLETS = 2
 
+# Skills printed per group. Groups may hold more; the most relevant ones for the
+# job come first and the rest wait for a job that asks for them.
+MAX_SKILLS_PER_GROUP = 9
+
 
 def renderable(profile: dict) -> dict:
     """Strip anything not yet true from the profile before any tailorer sees it.
@@ -207,7 +211,8 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
     profile = renderable(profile)
     max_projects = project_cap(profile, max_projects)
     jd = parse_jd(jd_text, profile)
-    report = {"angle_scores": jd["angle_scores"], "gap_skills": jd["gap_skills"], "decisions": []}
+    report = {"angle_scores": jd["angle_scores"], "gap_skills": jd["gap_skills"],
+              "matched_skills": jd["matched_skills"], "decisions": []}
 
     frozen = set(profile.get("_locked", {}).get("frozen_sections", []))
 
@@ -271,9 +276,6 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
         }
         if "link" in p:
             entry["link"] = p["link"]
-        tagline = p.get("taglines", {}).get(angle)
-        if tagline:
-            entry["tagline"] = tagline
         projects.append(entry)
         report["decisions"].append({
             "section": "projects", "name": p["name"], "score": p["_score"],
@@ -291,7 +293,7 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
             continue
         hits = [s for s in items if s in jd["matched_skills"]]
         rest = [s for s in items if s not in jd["matched_skills"]]
-        skills.append({"label": label, "items": hits + rest, "_matched": hits})
+        skills.append({"label": label, "items": (hits + rest)[:MAX_SKILLS_PER_GROUP], "_matched": hits})
 
     resume_data = {
         "basics": profile["basics"],

@@ -44,6 +44,29 @@ def link(value):
         raise ValueError('Links must be full http:// or https:// URLs without credentials.')
 
 
+
+FOCUS_ALIASES = {
+    'ai': 'agentic', 'llm': 'agentic', 'artificial intelligence': 'agentic',
+    'ai / agents': 'agentic', 'ai/agents': 'agentic',
+    'infrastructure': 'infra', 'devops': 'infra',
+    'front-end': 'frontend', 'front end': 'frontend',
+    'back-end': 'backend', 'back end': 'backend',
+    'ml': 'data', 'machine learning': 'data',
+    'evaluation': 'eval', 'testing': 'eval',
+}
+
+
+def normalize_focus(value):
+    value = text(value, 'Project focus area', 100, True).casefold()
+    value = FOCUS_ALIASES.get(value, value)
+    if value not in ANGLES:
+        raise ValueError('Unknown focus area: ' + value + '. Choose AI, backend, systems, infrastructure, frontend, data, testing, DSA, or teaching.')
+    return value
+
+
+def focus_list(values, label, limit=50):
+    return list(dict.fromkeys(normalize_focus(value) for value in array(values, label, limit)))
+
 def validate_profile(profile):
     obj(profile, 'Profile')
     basics = obj(profile.get('basics'), 'Contact details')
@@ -62,11 +85,10 @@ def validate_profile(profile):
                 text(entry.get(key), f'{section}: {key}', 500, key in ('id', 'name', 'org', 'role', 'degree', 'text'))
             if 'link' in entry:
                 link(entry['link'])
-            for key in ('stack', 'angles'):
-                for item in array(entry.get(key, []), key, 50):
-                    text(item, key, 100, True)
-                    if key == 'angles' and item not in ANGLES:
-                        raise ValueError(f'Unknown angle: {item}')
+            for item in array(entry.get('stack', []), 'Technologies', 50):
+                text(item, 'Technology', 100, True)
+            if 'angles' in entry:
+                entry['angles'] = focus_list(entry['angles'], 'Focus areas')
             if section in ('experience', 'projects'):
                 if entry['id'] in ids:
                     raise ValueError('Project and experience IDs must be unique.')
@@ -82,19 +104,19 @@ def validate_profile(profile):
                     text(b.get('text'), 'Bullet', 1200, True)
                     if b.get('status', 'shipped') not in ('planned', 'shipped'):
                         raise ValueError('Bullet status must be shipped or planned.')
-                    for a in array(b.get('angles', []), 'Bullet angles', 10):
-                        if a not in ANGLES:
-                            raise ValueError(f'Unknown angle: {a}')
+                    if 'angles' in b:
+                        b['angles'] = focus_list(b['angles'], 'Bullet focus areas', 10)
                 if section == 'projects' and sum(b.get('status', 'shipped') == 'shipped' for b in bullets) < 2:
                     raise ValueError('Each project needs at least two confirmed, shipped bullets.')
                 quota = entry.get('max_bullets', 4)
                 if type(quota) is not int or not 1 <= quota <= 30:
                     raise ValueError('max_bullets must be between 1 and 30.')
             if section == 'projects':
-                for angle, tagline in obj(entry.get('taglines', {}), 'Taglines').items():
-                    if angle not in ANGLES:
-                        raise ValueError(f'Unknown angle: {angle}')
-                    text(tagline, 'Tagline', 300, True)
+                if 'taglines' in entry:
+                    entry['taglines'] = {
+                        normalize_focus(angle): text(tagline, 'Tagline', 300, True)
+                        for angle, tagline in obj(entry['taglines'], 'Taglines').items()
+                    }
                 if '_readme' in entry:
                     text(entry['_readme'], 'README', 30000)
     for label, items in obj(profile.get('skills'), 'Skills').items():
@@ -153,7 +175,8 @@ class Store:
         filename = text(value.get('filename'), 'Filename', 100, True)
         if not re.fullmatch(r'[\w -]+', filename) or filename in ('.', '..'):
             raise ValueError('Filename: use letters, numbers, spaces, hyphens or underscores; omit .pdf.')
-        folder = text(value.get('output_dir'), 'Output folder', 2000, True)
+        folder = value.get('output_dir')
+        text(folder, 'Output folder', 2000, True)
         path = Path(folder).expanduser()
         if not path.is_absolute():
             path = self.root / path

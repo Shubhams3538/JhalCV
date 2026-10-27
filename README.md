@@ -2,7 +2,7 @@
 
 A local resume workspace: paste a job description, import your GitHub projects,
 review concise descriptions, and save a one-page PDF. Everyone runs their own
-copy. There is no central server, account, database, frontend build, or Python
+copy. There is no central server, account, frontend build, or Python
 package installation.
 
 ## Start the browser app
@@ -17,7 +17,7 @@ brew install typst poppler
 Then, from this repository:
 
 ```bash
-cp .env.example .env       # optional: add your own OPENAI_API_KEY
+cp .env.example .env       # optional: existing environment-key workflow
 ./start.sh
 # Windows, or any platform without sh:
 python3 app.py
@@ -26,6 +26,28 @@ python3 app.py
 The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
 Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
 URL yourself, use `python3 app.py --port 8765 --no-browser`.
+
+In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, or
+OpenRouter keys. A provider-specific model menu selects a default automatically;
+you can choose another named model or **Other model…** for a custom ID. Saved
+entries offer **Change model** without requiring the key again. You can keep several
+keys and use **Try first** to set priority. Failed keys are skipped for the rest
+of the current operation; another configured key/provider is tried automatically.
+If none succeeds, JhalCV preserves original wording and uses rules.
+
+Saved credentials are never sent back to the browser, not even partial prefixes
+or suffixes. Every entry displays the same dummy mask. New keys are entered in
+a password field, sent to the local backend, and cleared from the form on
+submission. They are stored in a permission-restricted `.local/credentials.json`
+file (0600 on macOS/Linux), **not encrypted at rest**. Keys are excluded from
+provider error messages, request-body caches, and reports. User-entered keys
+necessarily pass through the browser when first submitted; saved keys are never
+retrieved by the frontend.
+
+When no key is configured, a startup dialog offers **Add an API key**, **Not
+now**, or **I will never add an API key**. The last option is saved locally and
+stops future reminders. You can re-enable reminders in Settings. Rules mode
+continues to work without credentials.
 
 1. Open **My profile**, replace the sample contact details, experience,
    education, achievements, and skills, then save. An existing `profile.json`
@@ -39,9 +61,32 @@ URL yourself, use `python3 app.py --port 8765 --no-browser`.
    projects and lightly refines their bullets; rules work without an API key.
 4. Review the tailored bullet wording, then **Build PDF preview**. Check the
    PDF and any text-check warnings, then **Save to destination**.
-5. Change the output folder and filename in **Settings**. The default is
-   `build/shubham_Resume.pdf`. Existing files are never replaced: later exports
-   use `shubham_Resume_2.pdf`, and so on. The saved path is shown after export.
+5. Use **Choose folder…** in **Settings** to pick your saving folder, or enter
+   its path, then save settings. The default is `build/shubham_Resume.pdf`.
+   Each new export becomes the current file with that same name. The previous
+   PDF is preserved under `Archive/` with a unique dated filename. The saved
+   path is shown after export. Sort your file picker by **Date modified, newest
+   first** to put the most recently saved resume at the top; picker sorting
+   remains controlled by your operating system. Native selection uses macOS,
+   Windows, or Linux (Zenity/KDialog) dialogs, with manual path entry as fallback.
+
+### Import company career pages
+
+In **Jobs → Import companies CSV**, upload a UTF-8 CSV with two columns:
+
+```csv
+company,url
+Google,https://www.google.com/about/careers/applications/jobs/results/?location=India&sort_by=date
+```
+
+Review the preview and deselect any companies you do not want. Existing company
+names and equivalent URLs are skipped. Invalid rows stay out of the import.
+The limit is 500 companies and 500 KB per file. **India** is the default location
+filter for the imported companies; change it before confirming if needed.
+Importing only saves the sources. Select companies and use **Refresh selected**
+when ready to fetch jobs. Jobs and sources stay in the local `.local/jobs.db`.
+Portal filters are retained, while JhalCV also applies its location and posting-age
+rules. A valid careers link does not guarantee its site can currently be read.
 
 ### Clarity and the page budget
 
@@ -53,7 +98,8 @@ READMEs can contain plans, examples, or claims about other contributors.
 For existing bullets, every AI rewrite and every reviewed edit must fit the
 **original character count AND word count**, keep the same bullet count, and
 introduce no new numbers. Invalid AI edits fall back to the original bullet.
-Headings, taglines, project stacks, and the template are unchanged by rewriting.
+Project headings and stacks are unchanged by rewriting. Projects display their
+heading and bullets, with no short introduction.
 
 The original selected content is first fitted using the existing one-page
 renderer. Reviewed wording is then compiled with exactly that baseline's font,
@@ -67,7 +113,8 @@ identical line wrapping, so the rendered PDF is the final check.
 ### Local data and optional network services
 
 - `profile.json`: your source profile and confirmed project evidence.
-- `.local/settings.json`: your output folder, filename, mode, and model.
+- `.local/settings.json`: your output folder, filename, mode, and environment model.
+- `.local/credentials.json`: private keys, provider/model choices, priority, and reminder preference.
 - `.cache/web/`: PDF previews, rendered JSON, and decision reports including JDs.
 - `.cache/llm/`: cached model requests and responses.
 
@@ -84,9 +131,20 @@ links. Moved repositories need their current URL. API keys/tokens stay in the
 local Python process and never reach the frontend.
 
 In AI mode, your JD and relevant profile/project content are sent directly to
-OpenAI; README import contacts GitHub. **Rules only** in Settings makes no AI
-requests and uses README excerpts for import. Failed/invalid AI requests fall
-back to original wording and rule-based selection with a visible explanation.
+your configured providers; automatic failover can send the same content to
+another configured provider. README import contacts GitHub. **Rules only** in
+Settings makes no AI requests and uses README excerpts for import. Environment
+keys remain supported via `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`ANTHROPIC_API_KEY`, and `OPENROUTER_API_KEY`. **Ignore** hides an environment
+key from JhalCV without modifying the environment file.
+
+Provider adapters use native structured JSON requests: [OpenAI](https://developers.openai.com/api/docs/guides/structured-outputs),
+[Gemini](https://ai.google.dev/gemini-api/docs/generate-content/structured-output),
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+and [OpenRouter](https://openrouter.ai/docs/guides/features/structured-outputs).
+Model IDs are editable because availability depends on your provider account.
+Requests are limited to fixed official endpoints; keys travel only in headers.
+Responses are validated locally before use or caching.
 
 ### Verification
 
@@ -97,8 +155,10 @@ python3 -m unittest discover -s tests -v
 The suite covers storage validation, HTTP origin/token protection, GitHub URL
 and README handling, AI length/number fallback, fixed-section preservation,
 PDF overflow handling, real Typst/Poppler rendering, custom folders, stale
-previews, and filename collisions. PDF integration tests skip if tools are not
-installed.
+previews, archive preservation, and concurrent export protection. PDF integration tests skip if tools are not
+installed. Provider tests use mocked native responses and failures to check
+automatic failover, response validation, cache isolation, and credential privacy.
+These fixtures do not prove model availability on a particular provider account.
 
 ## Original terminal workflow
 
@@ -174,10 +234,9 @@ tailorer only *selects and reorders*. That property is what makes it safe to
 automate.
 
 Bullets carry `angles` from a closed enum (`agentic backend systems infra
-frontend data eval dsa teaching`). Projects also carry `taglines` keyed by
-angle, so one project introduces itself as *"thread-pooled HTTP server"* for a
-systems role and *"from-scratch HTTP server with connection pooling"* for a
-backend one. Same project, different framing, nothing invented.
+frontend data eval dsa teaching`). Projects show their name, technology stack,
+GitHub link, and selected bullets. Legacy `taglines` in existing profiles are
+accepted but do not appear in the editor or PDF.
 
 Bullets also carry `status`: `shipped` (default) or `planned`. Planned bullets
 never render and no tailorer is shown them — write them ahead as a spec, flip
@@ -320,3 +379,25 @@ resume/
 
 `needs_verification` fields flag numbers to confirm before sending. They never
 render. Three are outstanding, all on the web server project.
+
+## AI usage and dollar estimates
+
+Open **Usage** in the sidebar to see lifetime/today token counts, cached input, local cache hits, and a provider/model breakdown. Counts persist locally in `.local/usage.db` across app restarts. Tracking begins with this feature; older calls cannot be reconstructed. Only metadata and token/cost counters are saved, never prompts, answers or credentials.
+
+API-key costs use standard text pricing estimates; OpenRouter's reported request charge takes precedence when provided. Codex and Claude Code job calls appear separately as **subscription equivalent**, not an additional subscription bill. Claude's CLI cost is itself an estimate. Credits, free tiers, taxes and subscription fees are excluded. Unknown usage and unpriced models are explicitly marked as partial totals. Local response-cache hits add no new tokens or cost. Failed/malformed answers still count whenever the provider reports usage.
+
+The price snapshot was checked October 25, 2026 against the official [OpenAI](https://developers.openai.com/api/docs/pricing), [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [Gemini](https://ai.google.dev/gemini-api/docs/pricing), and [OpenRouter](https://openrouter.ai/docs/cookbook/administration/usage-accounting) pages. Rates are not refreshed automatically. Codex JSON usage does not report its model; its configurable valuation reference defaults to `gpt-6.1-sol`, verified as this installation's CLI default. Changing that reference affects future valuations only, not the model being run or past records. Unsupported long-context prices remain unpriced. Cache creation uses the default lifetime unless Anthropic reports one-hour creation explicitly. Gemini 3.8 Flash's announced January 2027 rate change is included.
+
+## Faster job refreshes
+
+Company collection uses eight workers and a shared pool of twelve detail readers. Browser renders are limited to four and subscription AI calls to three. Direct feeds run before generic pages. Each company has a 150-second active-work budget; waiting for a browser/AI slot is excluded, and network/AI calls also have shorter timeouts. This is a bounded-work policy rather than a guaranteed wall-clock completion time.
+
+The Jobs page shows completed companies and currently active companies. Today's postings can be classified while collection continues; older/undated backlog is classified after collection, newest first. Up to 120 full eligibility checks run per refresh, in parallel batches of eight with three workers and a 45-second active budget per batch. Uncertain/failing calls remain reviewable. Large detail-only listings can use one batched title screen to avoid fetching obviously unrelated roles; full feeds and small lists avoid that extra call.
+
+Exact unchanged AI prompts reuse local validated answers for up to fourteen days in `.cache/jobs-ai`. Changed job text, titles or candidate experience produce different cache keys. Structured and server-rendered pages skip Chrome where possible; known challenge pages skip pointless AI extraction.
+
+SmartRecruiters, Oracle Recruiting and Jibe/iCIMS have direct feed readers. Generic career pages are periodically checked for linked feeds without speculative board searches or rendering during discovery. Automatic upgrades retain original links, jobs and statuses and skip URL filters they cannot preserve. Job URL reconciliation and URL/ID deletion tombstones prevent duplicate Applied jobs and deleted jobs resurfacing when readers change. To repair a portal manually, expand **Edit career link** on its source card; saving retains the collection.
+
+Run `python3 scripts/benchmark_job_refresh.py` for a repeatable offline concurrency comparison. A local run over 147 simulated feeds measured 3.946 seconds serial versus 0.584 seconds with eight workers (6.75x); this excludes real network/browser/model latency and does not promise that improvement for every site. CAPTCHA/access-blocked sites still require a usable official board link.
+
+Use **Review unreviewed jobs (N)** to process all saved jobs still missing a relevance/eligibility decision. This action reads the local database and calls the subscription AI; it does not fetch career portals or posting details. It skips completed reviews, processes the full queue beyond the refresh's120-job cap, and saves each24-job chunk. Undated or uncertain results can remain in Needs review. The button is disabled during collection/review and when the queue is empty. Changing experience via Save & recheck also uses this saved-only path. Review-only activity records last_review separately and does not change the last portal-refresh time.

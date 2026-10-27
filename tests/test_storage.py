@@ -42,6 +42,32 @@ class StorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'two confirmed'):
             validate_profile(self.profile)
 
+    def test_ai_and_case_insensitive_focus_names_save_as_canonical_values(self):
+        project = self.profile['projects'][0]
+        project['angles'] = ['AI', 'Backend', 'ai', 'Infrastructure']
+        project['bullets'][0]['angles'] = ['LLM', 'Systems']
+        project['taglines'] = {'AI': 'Evidence-based AI project'}
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            store.save_profile(self.profile)
+            saved = store.profile()['projects'][0]
+        self.assertEqual(saved['angles'], ['agentic', 'backend', 'infra'])
+        self.assertEqual(saved['bullets'][0]['angles'], ['agentic', 'systems'])
+        self.assertEqual(saved['taglines'], {'agentic': 'Evidence-based AI project'})
+
+    def test_unknown_focus_still_rejected_with_useful_message(self):
+        self.profile['projects'][0]['angles'] = ['made-up-focus']
+        with self.assertRaisesRegex(ValueError, 'Choose AI, backend'):
+            validate_profile(self.profile)
+
+    def test_selected_folder_path_preserves_valid_trailing_spaces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            selected = Path(directory).resolve() / 'resumes '
+            settings = store.save_settings({'filename': 'shubham_Resume', 'output_dir': str(selected), 'model': 'test', 'tailorer': 'rules'})
+            self.assertEqual(settings['output_dir'], str(selected))
+            self.assertEqual(store.settings()['output_dir'], str(selected))
+
     def test_filename_cannot_escape_destination(self):
         with self.assertRaises(ValueError):
             Store(ROOT).validate_settings({'filename': '../profile.json', 'output_dir': 'build', 'model': 'gpt-5.5', 'tailorer': 'rules'})

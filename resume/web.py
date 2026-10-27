@@ -3,54 +3,145 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import time
 import json
 import secrets
+import sqlite3
 import shutil
 import threading
+import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .llm import have_key
+from . import llm
+from .credentials import CredentialStore, PROVIDERS
 from .storage import Store, text
 from .github import fetch_repository
 from .descriptions import import_project, rewrite_projects, budget
 from .tailor import tailor
 from .workspace import build_preview, export_preview
 from .render import RenderError
+from .folders import choose_folder
+from .insights import Insights, add_skill
+from .jobs.service import JobService
+from .usage import usage_scope
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
 
 
 class App:
-    def __init__(self, root=ROOT):
+    def __init__(self, root=ROOT, *, include_env=True):
         self.root = Path(root)
         self.store = Store(root)
+        self.credentials = CredentialStore(root, include_env=include_env)
+        self.insights = Insights(root)
+        self.jobs = JobService(root)
+        self.usage = self.jobs.usage
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
 
     def state(self):
         return {'profile': self.store.profile(), 'settings': self.store.settings(),
-                'example': not self.store.profile_path.exists(), 'ai_available': have_key(),
+                'example': not self.store.profile_path.exists(),
+                'ai_available': bool(self.credentials.routes(self.store.settings()['model'])),
+                'credentials': self.credentials.public(self.store.settings()['model']),
+                'profile_revision': self.profile_revision(),
                 'dependencies': {cmd: bool(shutil.which(cmd)) for cmd in ('typst', 'pdfinfo', 'pdftotext')},
                 'token': self.token}
 
     def post(self, path, body):
-        with self.lock:
+        with self.lock, usage_scope(self.usage, 'resume'):
+            if path == '/api/usage/settings':
+                return self.usage.set_reference(body.get('model'))
             if path == '/api/profile':
+                # A tab sends the revision it loaded, so an old tab cannot
+                # silently overwrite edits made elsewhere. Bare profiles are
+                # still accepted for scripts.
+                if set(body) == {'profile', 'revision'}:
+                    self.check_revision(body['revision'])
+                    body = body['profile']
                 self.store.save_profile(body)
-                return {'saved': True}
+                return {'saved': True, 'revision': self.profile_revision()}
+            if path == '/api/projects/remove':
+                text(body.get('id'), 'Project ID', 500, True)
+                if 'revision' in body:
+                    self.check_revision(body['revision'])
+                ident = body['id']
+                if not self.store.profile_path.exists():
+                    return {'removed': False}
+                profile = self.store.profile()
+                remaining = [p for p in profile['projects'] if p['id'] != ident]
+                if len(remaining) == len(profile['projects']):
+                    return {'removed': False}
+                profile['projects'] = remaining
+                self.store.save_profile(profile)
+                return {'removed': True, 'revision': self.profile_revision()}
+            if path == '/api/folder':
+                initial = body.get('initial', self.store.settings()['output_dir'])
+                text(initial, 'Destination folder', 2000, True)
+                initial_path = Path(initial).expanduser()
+                if not initial_path.is_absolute():
+                    initial_path = self.root / initial_path
+                return {'path': choose_folder(initial_path)}
+            if path.startswith('/api/keys/'):
+                if path == '/api/keys/add':
+                    self.credentials.add(body)
+                elif path == '/api/keys/remove':
+                    self.credentials.remove(body.get('id'))
+                elif path == '/api/keys/prefer':
+                    self.credentials.prefer(body.get('id'))
+                elif path == '/api/keys/model':
+                    self.credentials.set_model(body.get('id'), body.get('model'))
+                elif path == '/api/keys/reminder':
+                    self.credentials.reminder(body.get('dismissed'))
+                else:
+                    raise ValueError('Unknown API-key action.')
+                return self.credentials.public(self.store.settings()['model'])
             if path == '/api/settings':
                 return self.store.save_settings(body)
+            if path.startswith('/api/jobs/'):
+                return self.jobs_action(path, body)
+            if path.startswith('/api/insights/'):
+                if path == '/api/insights/add':
+                    if not self.store.profile_path.exists():
+                        raise ValueError('Save your own profile before adding skills.')
+                    profile = add_skill(self.store.profile(), body.get('skill'), body.get('group'))
+                    self.store.save_profile(profile)
+                elif path == '/api/insights/hide':
+                    self.insights.hide(text(body.get('skill'), 'Skill', 100, True))
+                elif path == '/api/insights/unhide':
+                    self.insights.unhide_all()
+                elif path == '/api/insights/reset':
+                    self.insights.reset()
+                else:
+                    raise ValueError('Unknown insights action.')
+                profile = self.store.profile()
+                return {'profile': profile, 'insights': self.insights.summary(profile),
+                        'revision': self.profile_revision()}
             if path == '/api/import':
                 jd = text(body.get('jd', ''), 'Job description', 30000)
-                return import_project(fetch_repository(body.get('url')), jd, self.store.settings())
+                evidence = fetch_repository(body.get('url'))
+                settings = self.store.settings()
+                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
+                    result = import_project(evidence, jd, settings)
+                result['notice'] += self.inference_notice(session)
+                return result
             if path == '/api/tailor':
-                return self.create_draft(body)
+                settings = self.store.settings()
+                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
+                    result = self.create_draft(body)
+                suffix = self.inference_notice(session)
+                result['notice'] += suffix
+                draft = self.drafts[result['id']]
+                draft['notice'] += suffix
+                draft['report']['providers_used'] = session['used']
+                draft['report']['key_failover_count'] = len(session['events'])
+                return result
             if path in ('/api/preview', '/api/export'):
                 draft = self.get_draft(body.get('id'))
                 if path == '/api/preview':
@@ -64,6 +155,79 @@ class App:
                 return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
 
+
+    def jobs_action(self, path, body):
+        try:
+            return self._jobs_action(path, body)
+        except sqlite3.Error:
+            raise ValueError('The jobs database is busy or unreadable. Try again in a moment.') from None
+
+    def _jobs_action(self, path, body):
+        def ident():
+            try:
+                return int(body.get('id'))
+            except (TypeError, ValueError):
+                raise ValueError('Choose a job or source.') from None
+        profile = self.store.profile()
+        if path == '/api/jobs/detail':
+            job = self.jobs.store.job(ident())
+            return {key: job[key] for key in ('id', 'title', 'company', 'location', 'url', 'description')}
+        if path == '/api/jobs/sources/add':
+            self.jobs.add_source(body.get('name'), body.get('url'), body.get('include', ''), body.get('exclude', ''), body.get('locations', ''))
+        elif path == '/api/jobs/sources/preview':
+            return self.jobs.preview_sources(body.get('csv'))
+        elif path == '/api/jobs/sources/import':
+            result = self.jobs.import_sources(body.get('rows'), body.get('locations', 'India'))
+            return {**result, 'state': self.jobs.state(profile)}
+        elif path == '/api/jobs/sources/url':
+            self.jobs.edit_source_url(ident(), body.get('url'))
+        elif path == '/api/jobs/sources/locations':
+            self.jobs.set_source_locations(ident(), body.get('locations', ''))
+        elif path == '/api/jobs/sources/remove':
+            self.jobs.store.remove_source(ident())
+        elif path == '/api/jobs/refresh':
+            known = {s['id'] for s in self.jobs.store.sources()}
+            if not known:
+                raise ValueError('Add a careers page first.')
+            chosen = body.get('sources')
+            if chosen is not None:
+                if (not isinstance(chosen, list) or not chosen
+                        or any(type(x) is not int or x not in known for x in chosen)):
+                    raise ValueError('Choose at least one of your saved companies to refresh.')
+                chosen = set(chosen)
+            if not self.jobs.start(profile, source_ids=chosen):
+                raise ValueError('A refresh is already running.')
+        elif path in ('/api/jobs/recheck', '/api/jobs/review'):
+            if not self.jobs.start(profile, recheck_only=True):
+                raise ValueError('A refresh is already running.')
+        elif path == '/api/jobs/delete-all':
+            self.jobs.store.delete_category(body.get('category'))
+        elif path == '/api/jobs/delete':
+            self.jobs.store.delete_job(ident())
+        elif path == '/api/jobs/status':
+            self.jobs.store.set_status(ident(), body.get('status'))
+        elif path == '/api/jobs/experience':
+            self.jobs.set_experience_years(body.get('years'))
+        else:
+            raise ValueError('Unknown jobs action.')
+        return self.jobs.state(profile)
+
+    def profile_revision(self):
+        path = self.store.profile_path
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16] if path.exists() else ''
+
+    def check_revision(self, revision):
+        if revision != self.profile_revision():
+            raise ValueError('Your profile was changed outside this tab. Reload the page to get the latest version, then redo this edit.')
+
+    @staticmethod
+    def inference_notice(session):
+        if not session['events']:
+            return ''
+        if session['used'] and not session['last_call_failed']:
+            name = PROVIDERS[session['used'][-1]['provider']]['name']
+            return f' A configured key failed; automatically continued with {name}.'
+        return ' Configured keys were unavailable; original wording and rules were used.'
 
     def get_draft(self, ident):
         draft = self.drafts.get(ident) if isinstance(ident, str) else None
@@ -91,6 +255,10 @@ class App:
             from .llm_tailor import tailor_llm
             data, report = tailor_llm(profile, jd, model=settings['model'])
         rewritten, notice = rewrite_projects(data, jd, settings)
+        try:
+            self.insights.record(jd, report.get('matched_skills', []) + report.get('gap_skills', []))
+        except (OSError, ValueError):
+            notice += ' Skill insights could not be saved for this job.'
         if report.get('tailorer') == 'rules' and settings['tailorer'] == 'auto':
             notice += ' Project selection used the rules fallback.'
         now = time.monotonic()
@@ -137,6 +305,24 @@ def handler(app):
                         return self.reply(200, app.state())
                 except (ValueError, OSError) as e:
                     return self.reply(400, {'error': str(e)})
+            if path == '/api/usage':
+                try:
+                    return self.reply(200, app.usage.summary())
+                except (sqlite3.Error, OSError):
+                    return self.reply(503, {'error': 'Usage accounting is currently unavailable.'})
+            if path == '/api/jobs':
+                try:
+                    return self.reply(200, app.jobs.state(app.store.profile()))
+                except sqlite3.Error:
+                    return self.reply(400, {'error': 'The jobs database is busy or unreadable. Try again in a moment.'})
+                except (ValueError, OSError) as e:
+                    return self.reply(400, {'error': str(e)})
+            if path == '/api/insights':
+                try:
+                    with app.lock:
+                        return self.reply(200, app.insights.summary(app.store.profile()))
+                except (ValueError, OSError) as e:
+                    return self.reply(400, {'error': str(e)})
             if path.startswith('/api/pdf/'):
                 parts = path.split('/')
                 try:
@@ -152,6 +338,7 @@ def handler(app):
                     return self.reply(404, {'error': str(e)})
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                     '/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if path in files:
                 name, mime = files[path]
@@ -175,6 +362,8 @@ def handler(app):
             except (ValueError, OSError) as e:
                 return self.reply(400, {'error': str(e)})
             except Exception:
+                # The terminal is local; the browser still never sees internals.
+                traceback.print_exc()
                 return self.reply(500, {'error': 'The operation failed. Your saved profile is unchanged. Check your tools and settings and retry.'})
     return Handler
 

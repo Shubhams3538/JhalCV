@@ -37,6 +37,22 @@ class WebTests(unittest.TestCase):
         with urllib.request.urlopen(req) as response:
             return json.load(response)
 
+    def test_usage_persistence_and_authenticated_reference_setting(self):
+        usage = self.request('/api/usage')
+        self.assertEqual(usage['total']['calls'], 0)
+        self.app.usage.record('openai', 'gpt-4o-mini', 100, 20)
+        self.assertEqual(self.request('/api/usage')['total']['input_tokens'], 100)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/usage/settings', {'model': 'gpt-4o-mini'}, {'Content-Type': 'application/json'})
+        self.assertEqual(error.exception.code, 403)
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        saved = self.request('/api/usage/settings', {'model': 'gpt-4o-mini'}, headers)
+        self.assertEqual(saved['codex_reference'], 'gpt-4o-mini')
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/usage/settings', {'model': 'unknown'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        self.assertNotIn('key', saved)
+
     def test_state_and_authenticated_save(self):
         state = self.request('/api/state')
         self.assertTrue(state['example'])
@@ -45,6 +61,130 @@ class WebTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 403)
         self.request('/api/profile', state['profile'], {'Content-Type': 'application/json', 'X-App-Token': state['token']})
         self.assertFalse(self.request('/api/state')['example'])
+
+    def test_stale_tab_cannot_overwrite_newer_profile(self):
+        state = self.request('/api/state')
+        headers = {'Content-Type': 'application/json', 'X-App-Token': state['token']}
+        first = self.request('/api/profile', {'profile': state['profile'], 'revision': state['profile_revision']}, headers)
+        changed = dict(state['profile'], basics=dict(state['profile']['basics'], name='Changed Elsewhere'))
+        self.request('/api/profile', {'profile': changed, 'revision': first['revision']}, headers)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/profile', {'profile': state['profile'], 'revision': first['revision']}, headers)
+        self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.app.store.profile()['basics']['name'], 'Changed Elsewhere')
+
+    def test_edit_job_source_link_preserves_saved_jobs(self):
+        source = self.app.jobs.add_source('Acme', 'https://acme.test/careers')
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        result = self.request('/api/jobs/sources/url', {'id': source['id'], 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
+        saved = next(src for src in result['sources'] if src['id'] == source['id'])
+        self.assertEqual(saved['kind'], 'greenhouse')
+        self.assertEqual(saved['original_url'], 'https://acme.test/careers')
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/sources/url', {'id': source['id'], 'url': 'http://127.0.0.1/'}, headers)
+        self.assertEqual(error.exception.code, 400)
+
+    def test_review_saved_jobs_endpoint_authentication_and_mode(self):
+        body = {}
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/review', body, {'Content-Type': 'application/json'})
+        self.assertEqual(error.exception.code, 403)
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        with patch.object(self.app.jobs, 'start', return_value=True) as start:
+            result = self.request('/api/jobs/review', body, headers)
+        start.assert_called_once_with(self.app.store.profile(), recheck_only=True)
+        self.assertIn('unreviewed_count', result)
+        with patch.object(self.app.jobs, 'start', return_value=False):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/jobs/review', body, headers)
+        self.assertEqual(error.exception.code, 400)
+
+    def test_jobs_endpoints(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
+        self.assertEqual([(s['name'], s['label']) for s in state['sources']], [('Acme', 'Greenhouse')])
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/sources/add', {'name': 'Local', 'url': 'http://127.0.0.1:8765/'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        store = self.app.jobs.store
+        store.save_listing(state['sources'][0]['id'], [{'external_id': '1', 'title': 'Engineer', 'location': 'Remote',
+            'url': 'https://x.test/1', 'posted': '', 'requirements': '2 years', 'description': 'Build APIs.'}])
+        ident = self.request('/api/jobs')['jobs'][0]['id']
+        self.assertEqual(self.request('/api/jobs/detail', {'id': ident}, headers)['description'], 'Build APIs.')
+        state = self.request('/api/jobs/status', {'id': ident, 'status': 'applied'}, headers)
+        self.assertEqual(state['jobs'][0]['status'], 'applied')
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/status', {'id': ident, 'status': 'deleted'}, headers)
+
+    def test_company_csv_preview_and_import_endpoints(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        preview = self.request('/api/jobs/sources/preview',
+                               {'csv': 'company,url\nExample,https://jobs.lever.co/example\n'}, headers)
+        self.assertEqual(preview['ready'], 1)
+        self.assertEqual(self.app.jobs.store.sources(), [])
+        imported = self.request('/api/jobs/sources/import', {'rows': preview['rows'], 'locations': 'India'}, headers)
+        self.assertEqual(imported['imported'], 1)
+        self.assertEqual(imported['state']['sources'][0]['locations'], 'India')
+        self.assertFalse(imported['state']['progress']['running'])
+        repeated = self.request('/api/jobs/sources/import', {'rows': preview['rows']}, headers)
+        self.assertEqual((repeated['imported'], repeated['skipped']), (0, 1))
+
+    def test_saved_source_location_filter_updates_without_removing_applied_jobs(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme',
+                                                       'locations': 'India'}, headers)
+        source = state['sources'][0]
+        self.assertEqual(source['locations'], 'India')
+        rows = [dict(external_id=str(i), title='Engineer', location=place,
+                     url=f'https://x.test/{i}', posted='', requirements='', description='')
+                for i, place in [(1, 'Gurgaon, Haryana, India'), (2, 'Singapore')]]
+        ids = self.app.jobs.store.save_listing(source['id'], rows)
+        self.assertEqual([j['id'] for j in self.request('/api/jobs')['jobs']], [ids[0]])
+        self.request('/api/jobs/status', {'id': ids[1], 'status': 'applied'}, headers)
+        state = self.request('/api/jobs/sources/locations', {'id': source['id'], 'locations': 'Singapore'}, headers)
+        self.assertEqual(state['sources'][0]['locations'], 'Singapore')
+        self.assertEqual({j['id'] for j in state['jobs']}, {ids[1]})
+
+    def test_saved_job_delete_endpoint_prevents_recollection(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        store = self.app.jobs.store
+        source = store.add_source('Acme', 'https://x.test/jobs', 'greenhouse')
+        item = dict(external_id='1', title='Engineer', location='India', url='https://x.test/job/1',
+                    posted='', requirements='', description='Build software')
+        ident = store.save_listing(source['id'], [item])[0]
+        state = self.request('/api/jobs/delete', {'id': ident}, headers)
+        self.assertEqual(state['jobs'], [])
+        self.assertEqual(store.save_listing(source['id'], [item]), [])
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/delete', {'id': ident}, headers)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/detail', {'id': ident}, headers)
+
+    def test_bulk_delete_keeps_other_categories(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        store = self.app.jobs.store
+        source = store.add_source('Acme', 'https://x.test/jobs', 'greenhouse')
+        items = [dict(external_id=str(i), title='Engineer', location='India', url=f'https://x.test/job/{i}',
+                      posted='', requirements='', description='Build software') for i in (1,2)]
+        ids = store.save_listing(source['id'], items)
+        store.set_status(ids[0], 'applied')
+        state = self.request('/api/jobs/delete-all', {'category':'applied'}, headers)
+        self.assertEqual([j['id'] for j in state['jobs']], [ids[1]])
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/jobs/delete-all', {'category':'all'}, headers)
+
+    def test_refresh_validates_chosen_companies(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        src = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)['sources'][0]
+        for bad in ([], [999], ['1'], [True], 'all'):
+            with self.subTest(bad=bad), self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/jobs/refresh', {'sources': bad}, headers)
+            self.assertEqual(error.exception.code, 400)
+        with patch.object(self.app.jobs, 'start', return_value=True) as start:
+            self.request('/api/jobs/refresh', {'sources': [src['id']]}, headers)
+            self.request('/api/jobs/refresh', {}, headers)
+        self.assertEqual(start.call_args_list[0].kwargs['source_ids'], {src['id']})
+        self.assertIsNone(start.call_args_list[1].kwargs['source_ids'])
 
     def test_foreign_origin_and_host_are_rejected(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token, 'Origin': 'https://evil.test'}
@@ -66,6 +206,72 @@ class WebTests(unittest.TestCase):
         for key in ('basics', 'education', 'coding_profiles'):
             self.assertEqual(stored[key], profile[key])
         self.assertEqual(stored['experience'][0]['bullets'], [b['text'] for b in profile['experience'][0]['bullets']])
+
+    @patch('resume.descriptions.llm.have_key', return_value=False)
+    def test_drafts_feed_insights_and_missing_skills_can_be_added(self, _):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({'output_dir': 'build', 'filename': 'shubham_Resume', 'tailorer': 'rules', 'model': 'test'})
+        jd = 'Backend engineer with Python, Kubernetes and Kafka experience building reliable services.'
+        self.app.post('/api/tailor', {'jd': jd, 'projects': [profile['projects'][0]['id']]})
+        self.app.post('/api/tailor', {'jd': jd, 'projects': [profile['projects'][0]['id']]})
+        insights = self.request('/api/insights')
+        self.assertEqual(insights['jobs'], 1)
+        missing = {m['skill'] for m in insights['missing']}
+        self.assertIn('Kafka', missing)
+        group = next(k for k, v in profile['skills'].items() if not k.startswith('_') and isinstance(v, list))
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        result = self.request('/api/insights/add', {'skill': 'Kafka', 'group': group}, headers)
+        self.assertIn('Kafka', result['profile']['skills'][group])
+        self.assertNotIn('Kafka', {m['skill'] for m in result['insights']['missing']})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/insights/add', {'skill': 'kafka', 'group': group}, headers)
+        self.assertEqual(error.exception.code, 400)
+
+    def test_remove_project_persists_after_reload_and_restart(self):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        ident = profile['projects'][0]['id']
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        self.assertTrue(self.request('/api/projects/remove', {'id': ident}, headers)['removed'])
+        reloaded = self.request('/api/state')['profile']
+        self.assertEqual(reloaded['projects'], [])
+        self.assertEqual(App(self.root).store.profile()['projects'], [])
+        for key in ('basics', 'experience', 'education', 'skills', 'coding_profiles'):
+            self.assertEqual(reloaded[key], profile[key])
+        self.assertEqual(self.request('/api/projects/remove', {'id': ident}, headers), {'removed': False})
+
+    def test_remove_matches_the_exact_saved_id(self):
+        profile = self.app.store.profile()
+        profile['projects'][0]['id'] = ' project-one '
+        self.app.store.save_profile(profile)
+        self.assertTrue(self.app.post('/api/projects/remove', {'id': ' project-one '})['removed'])
+        self.assertEqual(self.app.store.profile()['projects'], [])
+
+    def test_remove_unsaved_project_does_not_save_sample_profile(self):
+        self.assertEqual(self.app.post('/api/projects/remove', {'id': 'unsaved-project'}), {'removed': False})
+        self.assertFalse(self.app.store.profile_path.exists())
+
+    def test_remove_failure_preserves_saved_project(self):
+        self.app.store.save_profile(self.app.store.profile())
+        before = self.app.store.profile_path.read_bytes()
+        ident = self.app.store.profile()['projects'][0]['id']
+        with patch.object(self.app.store, 'save_profile', side_effect=OSError('Disk full')):
+            with self.assertRaises(OSError):
+                self.app.post('/api/projects/remove', {'id': ident})
+        self.assertEqual(self.app.store.profile_path.read_bytes(), before)
+
+    @patch('resume.web.choose_folder')
+    def test_folder_choice_does_not_persist_until_settings_are_saved(self, picker):
+        picker.return_value = str(self.root / 'chosen')
+        before = self.app.store.settings()
+        chosen = self.app.post('/api/folder', {'initial': 'new folder'})
+        self.assertEqual(chosen['path'], str(self.root / 'chosen'))
+        self.assertEqual(picker.call_args.args[0], self.root / 'new folder')
+        self.assertEqual(self.app.store.settings(), before)
+        picker.return_value = None
+        self.assertEqual(self.app.post('/api/folder', {}), {'path': None})
+        self.assertEqual(self.app.store.settings(), before)
 
     def test_expired_or_unknown_draft_has_useful_error(self):
         with self.assertRaisesRegex(ValueError, 'expired'):
