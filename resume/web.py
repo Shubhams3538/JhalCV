@@ -179,6 +179,8 @@ class App:
         elif path == '/api/jobs/sources/import':
             result = self.jobs.import_sources(body.get('rows'), body.get('locations', 'India'))
             return {**result, 'state': self.jobs.state(profile)}
+        elif path == '/api/jobs/sources/url':
+            self.jobs.edit_source_url(ident(), body.get('url'))
         elif path == '/api/jobs/sources/locations':
             self.jobs.set_source_locations(ident(), body.get('locations', ''))
         elif path == '/api/jobs/sources/remove':

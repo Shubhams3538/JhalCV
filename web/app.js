@@ -262,7 +262,7 @@ function renderJobs(data) {
   jobsData = data;
   const running = data.progress.running;
   $('#jobs-source-count').textContent = data.sources.length + (data.sources.length === 1 ? ' SOURCE' : ' SOURCES');
-  const sources = $('#jobs-sources'); sources.replaceChildren();
+  const sources = $('#jobs-sources'); const sourceScroll = sources.scrollTop; sources.replaceChildren();
   refreshPick = new Set([...refreshPick].filter(id => data.sources.some(s => s.id === id)));
   for (const src of data.sources) {
     const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
@@ -276,12 +276,17 @@ function renderJobs(data) {
         notify('Location filter saved. Refresh to collect matching jobs.');
       });
     }}, [locationInput, el('button', {type: 'submit', class: 'text-button', text: 'Save locations', disabled: running})]);
+    const urlInput = el('input', {type: 'url', value: src.url, required: true, maxLength: 3000, 'aria-label': `Career URL for ${src.name}`});
+    const editLink = el('details', {}, [el('summary', {text: 'Edit career link'}), el('form', {class: 'source-location-form', onsubmit: e => {
+      e.preventDefault();
+      task(e.submitter, async () => {renderJobs(await api('jobs/sources/url', {id: src.id, url: urlInput.value})); notify('Career link updated. Saved jobs are retained.');});
+    }}, [urlInput, el('button', {type: 'submit', class: 'text-button', text: 'Save link', disabled: running})])]);
     const pick = el('input', {type: 'checkbox', checked: refreshPick.has(src.id), disabled: running,
       'aria-label': `Include ${src.name} in Refresh selected`, onchange: e => {
         e.target.checked ? refreshPick.add(src.id) : refreshPick.delete(src.id); syncRefreshSelected();
       }});
     sources.append(el('div', {class: 'source-row'}, [
-      el('div', {class: 'source-info'}, [el('label', {class: 'source-pick'}, [pick, el('strong', {text: src.name})]), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm]),
+      el('div', {class: 'source-info'}, [el('label', {class: 'source-pick'}, [pick, el('strong', {text: src.name})]), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm, editLink]),
       el('div', {class: 'source-actions'}, [el('span', {class: 'pill', text: src.label.toUpperCase()}),
       el('button', {type: 'button', class: 'secondary', text: 'Refresh ↻', disabled: running, title: `Refresh only ${src.name}`,
         onclick: e => task(e.target, async () => renderJobs(await api('jobs/refresh', {sources: [src.id]})))}),
@@ -291,6 +296,7 @@ function renderJobs(data) {
       }})])]));
   }
   if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No careers pages yet. Add one above.'}));
+  sources.scrollTop = sourceScroll;
   const exp = data.experience;
   if (document.activeElement !== $('#jobs-years')) $('#jobs-years').value = exp.years;
   $('#jobs-years-hint').textContent = exp.custom
@@ -298,7 +304,11 @@ function renderJobs(data) {
     : `Calculated from your profile's experience dates (${exp.computed} years). Change it if some roles should not count.`;
   $('#jobs-years-reset').hidden = !exp.custom;
   const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
-  $('#jobs-progress').textContent = running ? data.progress.message
+  const active = (data.progress.active || []).join(', ');
+  const progress = data.progress.total != null
+    ? `${data.progress.completed || 0}/${data.progress.total} companies completed${active ? ' · Active: ' + active : ''}. ${data.progress.message}`
+    : data.progress.message;
+  $('#jobs-progress').textContent = running ? progress
     : data.progress.error ? 'Last refresh failed: ' + data.progress.error
     : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
   $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';

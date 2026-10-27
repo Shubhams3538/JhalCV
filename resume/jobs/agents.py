@@ -8,19 +8,27 @@ variables are removed so a call can never be billed to an API account.
 from __future__ import annotations
 
 import json
+import hashlib
+import threading
+import time
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-from ..usage import record_agent, usage_scope
+from ..usage import record_agent, usage_scope, record_cache
+from .fetch import FetchError, acquire_slot, remaining
 from ..llm import strictify
 from ..provider_api import validate_output
 from ..llm import LLMError
 
 ORDER = ('codex', 'claude')
-TIMEOUT = 300
+TIMEOUT = 75
+# Answers are keyed by the exact prompt (page text or job text), so an unchanged
+# page can reuse its answer for as long as refreshes are days apart.
+CACHE_SECONDS = 14 * 86400
+AI_SLOTS = 3
 NAMES = {'codex': 'Codex', 'claude': 'Claude Code'}
 _SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
             'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENROUTER_API_KEY')
@@ -41,9 +49,10 @@ def _env() -> dict:
 def _run(cmd, prompt, cwd):
     try:
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=cwd,
-                              env=_env(), timeout=TIMEOUT)
+                              env=_env(), timeout=remaining(TIMEOUT))
     except subprocess.TimeoutExpired as e:
         record_agent(cmd[0], e.stdout)
+        remaining()  # Company deadline exhaustion is not a provider outage.
         raise AgentError('timed out') from None
     except OSError as e:
         record_agent(cmd[0], '')
@@ -86,28 +95,88 @@ RUNNERS = {'codex': _codex, 'claude': _claude}
 class Agents:
     """One per refresh: remembers which agents already failed in this run."""
 
-    def __init__(self, order=ORDER, *, usage_store=None):
+    def __init__(self, order=ORDER, *, usage_store=None, cache_dir=None):
         self.usage_store = usage_store
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+        self._slots = threading.BoundedSemaphore(AI_SLOTS)
+        self._state_lock = threading.Lock()
+        self._local = threading.local()
         self.order = [name for name in order if shutil.which(name)]
         self.failed: dict[str, str] = {}
         self.used: list[str] = []
 
+    @property
+    def last_used(self):
+        return getattr(self._local, 'provider', None)
+
     def ask(self, prompt: str, schema: dict) -> dict:
         schema = strictify(schema)
+        key = hashlib.sha256(json.dumps([prompt, schema], sort_keys=True).encode()).hexdigest()
+        path = self.cache_dir / (key + '.json') if self.cache_dir else None
+        if path:
+            try:
+                entry = json.loads(path.read_text())
+                if time.time() - entry['at'] < CACHE_SECONDS and entry['provider'] in self.order:
+                    validate_output(entry['answer'], schema)
+                    self._used(entry['provider'])
+                    with usage_scope(self.usage_store, 'jobs'):
+                        record_cache(entry['provider'], 'local agent cache')
+                    return entry['answer']
+            except (OSError, ValueError, TypeError, KeyError, LLMError):
+                pass
+        remaining(TIMEOUT)
+        try:
+            acquire_slot(self._slots, 'AI is busy; this company will retry next refresh.')
+        except FetchError as e:
+            raise AgentError(str(e)) from None
+        try:
+            remaining(TIMEOUT)
+            answer = self._ask(prompt, schema)
+        finally:
+            self._slots.release()
+        if path:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+                    tmp = Path(stream.name)
+                    json.dump({'at': time.time(), 'provider': self.last_used, 'answer': answer}, stream)
+                os.replace(tmp, path)
+            except OSError:
+                pass
+        return answer
+
+    def _used(self, name):
+        self._local.provider = name
+        with self._state_lock:
+            if name not in self.used:
+                self.used.append(name)
+
+    def _ask(self, prompt, schema):
+        errors = {}
         for name in self.order:
-            if name in self.failed:
-                continue
+            with self._state_lock:
+                if name in self.failed:
+                    continue
             with tempfile.TemporaryDirectory(prefix='jhalcv-agent-') as tmp:
                 try:
                     with usage_scope(self.usage_store, 'jobs'):
                         answer = RUNNERS[name](prompt, schema, Path(tmp))
                     validate_output(answer, schema)
                 except (AgentError, LLMError) as e:
-                    self.failed[name] = str(e)
+                    errors[name] = str(e)
+                    # Bad page output and slow calls are local failures. Only an
+                    # unavailable account/installation should disable a provider globally.
+                    if any(word in str(e).lower() for word in
+                           ('usage limit', 'rate limit', 'quota', 'logged out', 'login',
+                            'not authenticated', 'authentication', 'unauthorized',
+                            'credit balance', 'could not start')):
+                        with self._state_lock:
+                            self.failed[name] = str(e)
                     continue
-            if name not in self.used:
-                self.used.append(name)
+            self._used(name)
             return answer
         if not self.order:
             raise AgentError('Neither Codex nor Claude Code is installed.')
-        raise AgentError('; '.join(f'{NAMES[n]}: {why}' for n, why in self.failed.items()))
+        with self._state_lock:
+            failures = dict(self.failed, **errors)
+            raise AgentError('; '.join(f'{NAMES[n]}: {why}' for n, why in failures.items()))

@@ -12,7 +12,9 @@ text (see `page_jobs`).
 """
 from __future__ import annotations
 
+import contextvars
 import json
+from concurrent.futures import ThreadPoolExecutor
 import html
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -26,7 +28,8 @@ from .fetch import FetchError, browser, get_json, get_text, html_to_text, page_w
 MAX_JOBS = 300
 
 LABELS = {'google': 'Google Careers', 'amazon': 'Amazon Jobs', 'workday': 'Workday',
-          'greenhouse': 'Greenhouse', 'lever': 'Lever', 'ashby': 'Ashby', 'page': 'AI page reader'}
+          'greenhouse': 'Greenhouse', 'lever': 'Lever', 'ashby': 'Ashby', 'smartrecruiters': 'SmartRecruiters',
+          'oracle': 'Oracle Recruiting', 'jibe': 'Jibe / iCIMS', 'page': 'AI page reader'}
 
 
 def detect(url: str) -> str:
@@ -44,6 +47,10 @@ def detect(url: str) -> str:
         return 'lever'
     if host == 'jobs.ashbyhq.com':
         return 'ashby'
+    if host in ('careers.smartrecruiters.com', 'jobs.smartrecruiters.com') and path.strip('/'):
+        return 'smartrecruiters'
+    if host.endswith('.oraclecloud.com') and '/hcmUI/CandidateExperience/' in path:
+        return 'oracle'
     return 'page'
 
 
@@ -72,6 +79,14 @@ def _job(external_id, title, location='', url='', posted='', requirements='', de
             'requirements': requirements[:20000], 'description': description[:30000]}
 
 
+# Workday sites name places inconsistently: "India", "Pune, India", "IN KA Bengaluru",
+# or an office name such as "Mumbai, Altimus". Any of these marks an India location.
+INDIA_PLACE = re.compile(
+    r'\bindia\b|^\s*IND?\b[\s,-]|\b(?:bengaluru|bangalore|mumbai|navi mumbai|pune|hyderabad|chennai|gurgaon|gurugram|'
+    r'noida|new delhi|delhi|kolkata|ahmedabad|kochi|cochin|jaipur|vadodara|chandigarh|coimbatore|thiruvananthapuram|'
+    r'trivandrum|indore|nagpur|mysuru|mysore|visakhapatnam|bhubaneswar|mohali)\b', re.I)
+
+
 def _with_country(location, country):
     """Keep explicit feed country data when the display location is city-only."""
     location = str(location or '')
@@ -84,8 +99,9 @@ def _workday_india_filter(facets, selected):
     for facet in facets:
         param = facet.get('facetParameter', '')
         selected_ids = set(selected.get(param, []))
+        # A country value ("India") or city values ("Pune, India"); never "Indiana".
         india_ids = {value.get('id') for value in facet.get('values') or []
-                     if value.get('descriptor', '').casefold() == 'india'}
+                     if INDIA_PLACE.search(value.get('descriptor', ''))}
         if re.search('location|country', param, re.I) and selected_ids and selected_ids <= india_ids:
             return True
         for value in facet.get('values') or []:
@@ -179,21 +195,29 @@ def workday(url: str) -> list[dict]:
             search = v
         else:
             facets.setdefault(k, []).append(v)
-    jobs, offset, india = [], 0, False
-    while len(jobs) < MAX_JOBS:
-        data = post_json(base + '/jobs', {'appliedFacets': facets, 'limit': 20, 'offset': offset, 'searchText': search})
-        batch = data.get('jobPostings') or []
-        india = india or _workday_india_filter(data.get('facets') or [], facets)
-        for j in batch:
+    body = lambda offset, size=20: {'appliedFacets': facets, 'limit': size, 'offset': offset, 'searchText': search}
+    first = post_json(base + '/jobs', body(0))
+    # Workday reports the total only on the first page (later pages say 0), so
+    # once it is known the remaining pages are fetched in parallel, using the
+    # page size the site actually served.
+    total = min(int(first.get('total') or 0), MAX_JOBS)
+    step = len(first.get('jobPostings') or []) or 20
+    pages = [first]
+    offsets = list(range(step, total, step))
+    if offsets:
+        context = contextvars.copy_context()  # keep the company's time budget in worker threads
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            pages += list(pool.map(lambda o: context.copy().run(post_json, base + '/jobs', body(o, step)), offsets))
+    india = any(_workday_india_filter(page.get('facets') or [], facets) for page in pages)
+    jobs = []
+    for page in pages:
+        for j in page.get('jobPostings') or []:
             path = j.get('externalPath') or ''
             item = _job(path.rsplit('_', 1)[-1] or path, j.get('title'), _with_country(j.get('locationsText'), 'India' if india else ''),
                         f'https://{parts.hostname}{parts.path.rstrip("/")}{path[path.find("/job/"):] if "/job/" in path else path}',
                         _date(j.get('postedOn')))
             item['needs_detail'] = base + path
             jobs.append(item)
-        offset += len(batch)
-        if not batch or offset >= int(data.get('total') or 0):
-            break
     return newest_first(jobs)[:MAX_JOBS]
 
 
@@ -313,10 +337,24 @@ def _page(url: str) -> tuple[str, bool]:
     return render_page(url), True
 
 
+def _visible_job_links(page, url):
+    # Server-rendered listings already contain the links and text needed by AI.
+    # Do not launch Chrome merely because the site omits JSON-LD.
+    _, links = page_with_links(page, url)
+    return sum(bool(re.search(r'/(?:jobs?|positions?|openings?)/[^/?#]+', urlsplit(link).path, re.I))
+               for link in links) >= 2
+
+
+def _blocked_page(page):
+    title = re.search(r'<title[^>]*>(.*?)</title>', page, re.I | re.S)
+    return bool(title and re.search(r'^(?:\s*)(?:just a moment|access denied|attention required|request blocked|robot check|verify you are human)\b',
+                                   html_to_text(title.group(1)), re.I))
+
+
 def page_jobs(url: str, ask) -> list[dict]:
     """`ask(prompt, schema)` runs an agent and returns its JSON answer."""
     page, rendered = _page(url)
-    if not rendered and not _embedded_greenhouse(page) and not _json_ld_jobs(page, url) and browser():
+    if not rendered and not _embedded_greenhouse(page) and not _json_ld_jobs(page, url) and not _visible_job_links(page, url) and browser():
         # Nothing structured in the raw HTML: the listings are most likely
         # added by JavaScript, so read the page as a browser would.
         page, rendered = render_page(url), True
@@ -331,6 +369,8 @@ def page_jobs(url: str, ask) -> list[dict]:
             if visible:
                 found[0]['posted'] = visible
         return newest_first(found)[:MAX_JOBS]
+    if _blocked_page(page):
+        raise FetchError('The site returned an access challenge instead of job listings; retry later.')
     text, links = page_with_links(page, url)
     if len(text) < 200:
         raise FetchError('This page loads its jobs with JavaScript, so it cannot be read directly. '
@@ -382,6 +422,108 @@ def page_detail(item: dict) -> dict:
 
 
 
+# ── SmartRecruiters: public postings API ─────────────────────────────────
+
+def smartrecruiters(url: str) -> list[dict]:
+    company = next((s for s in urlsplit(url).path.split('/') if s), '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', company):
+        raise FetchError('Use the SmartRecruiters company page, e.g. https://careers.smartrecruiters.com/Company.')
+    jobs, offset = [], 0
+    while True:
+        data = get_json(f'https://api.smartrecruiters.com/v1/companies/{company}/postings?limit=100&offset={offset}')
+        batch = data.get('content') or []
+        for j in batch:
+            place = j.get('location') or {}
+            location = re.sub(r'(,\s*)+', ', ', str(place.get('fullLocation') or place.get('city') or '')).strip(', ')
+            item = _job(j.get('id'), j.get('name'), _with_country(location, place.get('country')),
+                        f'https://jobs.smartrecruiters.com/{company}/{j.get("id")}', _date(j.get('releasedDate')))
+            item['needs_detail'] = j.get('ref') or f'https://api.smartrecruiters.com/v1/companies/{company}/postings/{j.get("id")}'
+            jobs.append(item)
+        offset += len(batch)
+        if not batch or offset >= int(data.get('totalFound') or 0) or offset >= 2000:
+            break
+    return jobs
+
+
+def smartrecruiters_detail(item: dict) -> dict:
+    sections = ((get_json(item['needs_detail']).get('jobAd') or {}).get('sections') or {})
+    text = lambda key: html_to_text((sections.get(key) or {}).get('text') or '')
+    quals = text('qualifications')
+    description = '\n\n'.join(x for x in (text('jobDescription'), quals and 'Qualifications\n' + quals) if x)
+    return {'requirements': (quals or description)[:20000], 'description': description[:30000]}
+
+
+# ── Oracle Recruiting Cloud: public candidate-experience REST API ────────
+
+def _oracle_parts(url: str):
+    parts = urlsplit(url)
+    site = re.search(r'/sites/([A-Za-z0-9_]+)', parts.path)
+    if not site:
+        raise FetchError('Use the Oracle Recruiting search URL, e.g. …/hcmUI/CandidateExperience/en/sites/CX_1/jobs.')
+    return parts.hostname, site.group(1), dict(parse_qsl(parts.query))
+
+
+def oracle(url: str) -> list[dict]:
+    host, site, query = _oracle_parts(url)
+    finder = f'findReqs;siteNumber={site},facetsList=LOCATIONS,limit=25,sortBy=POSTING_DATES_DESC'
+    if query.get('locationId'):
+        finder += f',locationId={query["locationId"]}'
+    if query.get('keyword'):
+        finder += f',keyword="{query["keyword"]}"'
+    jobs, offset = [], 0
+    while len(jobs) < MAX_JOBS:
+        data = get_json(f'https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true'
+                        f'&expand=requisitionList.secondaryLocations&finder={finder},offset={offset}')
+        block = (data.get('items') or [{}])[0]
+        batch = block.get('requisitionList') or []
+        for j in batch:
+            places = [j.get('PrimaryLocation')] + [l.get('Name') for l in j.get('secondaryLocations') or []]
+            item = _job(j.get('Id'), j.get('Title'), '; '.join(p for p in places if p),
+                        f'https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{j.get("Id")}', _date(j.get('PostedDate')))
+            item['needs_detail'] = (f'https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all'
+                                    f'&onlyData=true&finder=ById;Id=%22{j.get("Id")}%22,siteNumber={site}')
+            jobs.append(item)
+        offset += len(batch)
+        if not batch or offset >= int(block.get('TotalJobsCount') or 0):
+            break
+    return jobs[:MAX_JOBS]
+
+
+def oracle_detail(item: dict) -> dict:
+    info = (get_json(item['needs_detail']).get('items') or [{}])[0]
+    text = lambda key: html_to_text(info.get(key) or '')
+    quals = '\n'.join(x for x in (text('ExternalQualificationsStr'), text('ExternalResponsibilitiesStr')) if x)
+    description = '\n\n'.join(x for x in (text('ExternalDescriptionStr'), quals) if x)
+    return {'requirements': (quals or description)[:20000], 'description': description[:30000],
+            'posted': _date(info.get('ExternalPostedStartDate'))}
+
+
+# ── Jibe (iCIMS) career sites: the site's own /api/jobs feed ─────────────
+
+def jibe(url: str) -> list[dict]:
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k not in ('page', 'limit')]
+    jobs, page = [], 1
+    while len(jobs) < MAX_JOBS:
+        data = get_json(f'https://{parts.hostname}/api/jobs?' + urlencode(query + [('page', page), ('limit', 100),
+                                                                                    ('sortBy', 'posted_date'), ('descending', 'true')]))
+        batch = [j.get('data') or {} for j in data.get('jobs') or []]
+        for j in batch:
+            place = j.get('location_name') or ', '.join(x for x in (j.get('city'), j.get('state')) if x)
+            quals = html_to_text(j.get('qualifications') or '')
+            description = '\n\n'.join(x for x in (html_to_text(j.get('description') or ''),
+                                                 html_to_text(j.get('responsibilities') or ''),
+                                                 quals and 'Qualifications\n' + quals) if x)
+            jobs.append(_job(j.get('req_id') or j.get('slug'), j.get('title'), _with_country(place, j.get('country')),
+                             f'https://{parts.hostname}/jobs/{j.get("slug") or j.get("req_id")}', _date(j.get('posted_date')),
+                             quals or description, description))
+        if not batch or len(jobs) >= int(data.get('totalCount') or 0):
+            break
+        page += 1
+    return jobs[:MAX_JOBS]
+
+
 READERS = {'amazon': amazon, 'google': google, 'workday': workday,
-           'greenhouse': greenhouse, 'lever': lever, 'ashby': ashby}
-DETAILS = {'workday': workday_detail, 'page': page_detail}
+           'greenhouse': greenhouse, 'lever': lever, 'ashby': ashby, 'smartrecruiters': smartrecruiters,
+           'oracle': oracle, 'jibe': jibe}
+DETAILS = {'workday': workday_detail, 'page': page_detail, 'smartrecruiters': smartrecruiters_detail, 'oracle': oracle_detail}

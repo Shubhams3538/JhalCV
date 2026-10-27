@@ -13,14 +13,17 @@ from resume.jobs.store import JobStore
 
 # Tests use fake hosts; never launch the real browser unless a test asks for it.
 _no_browser = patch('resume.jobs.sources.browser', return_value=None)
+_no_resolver = patch('resume.jobs.service.resolve', return_value=None)
 
 
 def setUpModule():
     _no_browser.start()
+    _no_resolver.start()
 
 
 def tearDownModule():
     _no_browser.stop()
+    _no_resolver.stop()
 
 
 def job(ext, title='Software Engineer', reqs='Bachelor degree. 3+ years of software development experience.'):
@@ -188,6 +191,25 @@ class AgentTests(unittest.TestCase):
                 agents.Agents().ask('q', {'type': 'object', 'properties': {}})
 
 
+class AgentCacheTests(unittest.TestCase):
+    def test_unchanged_prompt_reuses_answer_for_days(self):
+        calls = []
+        def codex(prompt, schema, folder):
+            calls.append(prompt)
+            return {'answer': 'ok'}
+        schema = {'type': 'object', 'properties': {'answer': {'type': 'string'}}}
+        with tempfile.TemporaryDirectory() as cache, patch.dict(agents.RUNNERS, {'codex': codex}), \
+                patch('resume.jobs.agents.shutil.which', return_value='/bin/x'):
+            agents.Agents(order=('codex',), cache_dir=cache).ask('same page', schema)
+            three_days = agents.time.time() + 3 * 86400
+            with patch('resume.jobs.agents.time.time', return_value=three_days):
+                agents.Agents(order=('codex',), cache_dir=cache).ask('same page', schema)
+                agents.Agents(order=('codex',), cache_dir=cache).ask('changed page', schema)
+            with patch('resume.jobs.agents.time.time', return_value=three_days + 12 * 86400):
+                agents.Agents(order=('codex',), cache_dir=cache).ask('same page', schema)
+        self.assertEqual(calls, ['same page', 'changed page', 'same page'])
+
+
 class EligibilityTests(unittest.TestCase):
     def test_profile_years_counts_overlaps_once(self):
         profile = {'experience': [{'start': 'Jan 2024', 'end': 'Dec 2024'}, {'start': 'Jun 2024', 'end': 'Jun 2025'}]}
@@ -220,6 +242,32 @@ class StoreAndServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_one_crashing_company_does_not_abort_the_refresh(self):
+        self.service.add_source('Good', 'https://job-boards.greenhouse.io/good')
+        self.service.add_source('Crash', 'https://job-boards.greenhouse.io/crash')
+        def reader(url):
+            if url.endswith('crash'):
+                raise RuntimeError('unexpected parser bug')
+            return [job('g1')]
+        with patch.dict(sources.READERS, {'greenhouse': reader}), patch('resume.jobs.agents.shutil.which', return_value=None):
+            summary = self.service.refresh({'experience': []}, lambda m: None)
+        self.assertIn('could not read: Crash', summary)
+        self.assertEqual([j['url'] for j in self.service.store.jobs()], ['https://x.test/g1'])
+        errors = {s['name']: s['last_error'] for s in self.service.store.sources()}
+        self.assertEqual(errors['Crash'], 'unexpected parser bug')
+        self.assertIsNone(errors['Good'])
+
+    def test_unreadable_job_page_is_skipped_not_fatal(self):
+        def detail(item):
+            if item['external_id'] == 'bad':
+                raise KeyError('missing field')
+            return {'requirements': 'Needs 1 year', 'description': 'Build', 'posted': date.today().isoformat()}
+        items = [{'external_id': 'bad'}, {'external_id': 'good'}]
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(2) as pool:
+            got = list(JobService._details(items, detail, pool, None))
+        self.assertEqual([item['external_id'] for item, _ in got], ['good'])
 
     def test_title_filters(self):
         self.assertTrue(title_matches('Software Engineer II', 'engineer, developer', 'senior'))
@@ -367,20 +415,25 @@ class FreshnessServiceTests(unittest.TestCase):
         seen = []
         class Fake:
             used = ['codex']
+            last_used = 'codex'
             def ask(self, prompt, schema):
+                if 'drop' in schema['properties']:
+                    return {'drop': []}  # title screen keeps both titles
                 seen.append(prompt)
                 return {'results': [{'id': str(j['id']), 'min_years': 0, 'eligible': 'yes',
                                      'reason': 'No required years.', 'relevant': 'no' if j['title'] == 'Recruiter' else 'yes',
                                      'relevance_reason': 'Based on duties.'} for j in store.unchecked(120)]}
         store = self.store
         old = dict(job('old'), posted=(date.today() - timedelta(days=8)).isoformat())
-        recent = dict(job('recent', 'Application Associate'), description='Build and test software APIs.')
-        unknown = dict(job('unknown', 'Recruiter'), posted='')
+        recent = dict(job('recent', 'Application Associate', 'Bachelor degree.'), description='Build and test software APIs.')
+        unknown = dict(job('unknown', 'Recruiter', 'Bachelor degree.'), posted='')
         with patch.dict(sources.READERS, {'greenhouse': lambda url: [old, unknown, recent]}), \
                 patch('resume.jobs.service.Agents', return_value=Fake()):
             self.service.refresh({'experience': []}, lambda m: None)
+            first_calls = len(seen)
             self.service.refresh({'experience': []}, lambda m: None)
-        self.assertEqual(len(seen), 1)
+        self.assertEqual(first_calls, 2)  # today's jobs first, undated backlog after collection
+        self.assertEqual(len(seen), first_calls)
         self.assertNotIn('https://x.test/old', {j['url'] for j in store.jobs()})
         rows = store.jobs()
         self.assertEqual([(j['title'], j['freshness'], j['relevant']) for j in rows],
@@ -435,7 +488,9 @@ class FreshnessServiceTests(unittest.TestCase):
                 patch.dict(sources.DETAILS, {'workday': lambda item: old_detail}), \
                 patch('resume.jobs.service.Agents') as ai:
             self.service.refresh({'experience': []}, lambda m: None)
-        ai.return_value.ask.assert_not_called()
+        # Only the cheap title screen may run before the date is known; no full-text check.
+        prompts = [c.args[0] for c in ai.return_value.ask.call_args_list]
+        self.assertTrue(all(p.startswith('Below are job titles') for p in prompts))
         self.assertEqual(self.store.jobs(), [])
 
     def test_deferred_details_are_retried_next_refresh(self):
@@ -740,6 +795,137 @@ class BrowserRenderTests(unittest.TestCase):
                 patch('resume.jobs.sources.render_page') as render:
             sources.page_detail({'needs_detail': 'https://careers.x.test/job/11'})
         render.assert_not_called()
+
+
+class CostSavingTests(unittest.TestCase):
+    def test_full_requirements_still_reach_the_ai(self):
+        class Fake:
+            used, last_used, prompts = ['codex'], 'codex', []
+            def ask(self, prompt, schema):
+                self.prompts.append(prompt)
+                return {'results': [{'id': '2', 'min_years': None, 'eligible': 'yes', 'reason': 'r',
+                                     'relevant': 'yes', 'relevance_reason': 'r'}]}
+        fake = Fake()
+        out = eligibility.check([{'id': 1, 'title': 'SWE III', 'requirements': '8+ years of professional experience.'},
+                                 {'id': 2, 'title': 'SWE', 'requirements': 'Bachelor degree.'}], 1.5, fake)
+        self.assertEqual((out[1]['eligible'], out[1]['by']), ('no', 'rules'))
+        self.assertEqual(out[2]['by'], 'codex')
+        self.assertEqual(len(fake.prompts), 1)
+        self.assertIn('SWE III', fake.prompts[0])
+
+    def test_title_screen_drops_listed_titles_and_survives_failures(self):
+        items = [{'external_id': 'a', 'title': 'Account Executive'}, {'external_id': 'b', 'title': 'Software Engineer'}]
+        class Fake:
+            def ask(self, prompt, schema):
+                return {'drop': [{'id': '0', 'reason': 'Sales role.'}, {'id': '9', 'reason': 'out of range'}]}
+        self.assertEqual(eligibility.screen_titles(items, 1.5, Fake()), {'a': 'Sales role.'})
+        class Broken:
+            def ask(self, prompt, schema):
+                raise agents.AgentError('usage limit reached')
+        self.assertEqual(eligibility.screen_titles(items, 1.5, Broken()), {})
+
+    def test_screened_titles_skip_details_and_land_in_not_eligible(self):
+        with tempfile.TemporaryDirectory() as root:
+            service = JobService(root)
+            src = service.add_source('Acme', 'https://acme.wd1.myworkdayjobs.com/External')
+            listing = [dict(job('sales', 'Account Executive', ''), posted='', needs_detail='https://x.test/sales'),
+                       dict(job('swe', 'Software Engineer', ''), posted='', needs_detail='https://x.test/swe')]
+            opened = []
+            def detail(item):
+                opened.append(item['external_id'])
+                return {'posted': date.today().isoformat(), 'requirements': 'Bachelor degree.', 'description': 'Build.'}
+            class Fake:
+                used, last_used, failed, order = ['codex'], 'codex', {}, ['codex']
+                def ask(self, prompt, schema):
+                    if 'drop' in schema['properties']:
+                        return {'drop': [{'id': '0', 'reason': 'Sales role.'}]}
+                    return {'results': []}
+            with patch.dict(sources.READERS, {'workday': lambda url: listing}), \
+                    patch.dict(sources.DETAILS, {'workday': detail}), \
+                    patch('resume.jobs.service.Agents', return_value=Fake()), \
+                    patch('resume.jobs.service.TITLE_SCREEN_MIN', 1):
+                service.refresh({'experience': [{'start': 'Jan 2025', 'end': 'Jun 2026'}]}, lambda m: None)
+            self.assertEqual(opened, ['swe'])
+            sales = next(j for j in service.store.jobs() if j['title'] == 'Account Executive')
+            self.assertEqual((sales['category'], sales['relevance_reason']), ('no', 'Sales role.'))
+            self.assertEqual(src['kind'], 'workday')
+
+    def test_queue_wait_is_not_charged_to_the_company_budget(self):
+        import threading
+        from resume.jobs import fetch
+        slot = threading.BoundedSemaphore(1)
+        slot.acquire()
+        threading.Timer(0.3, slot.release).start()
+        with fetch.fetch_budget(fetch.time.monotonic() + 0.2):
+            fetch.acquire_slot(slot, 'busy')
+            self.assertGreater(fetch.remaining(), 0.05)  # budget extended by the 0.3s wait
+        slot.release()
+
+
+class ResolverAndSmartRecruitersTests(unittest.TestCase):
+    def test_finds_platform_boards_in_page_markup(self):
+        from resume.jobs.resolve import found_in_page
+        page = ('<script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>'
+                '<a href="https://jobs.lever.co/acme-labs/123">x</a>'
+                '{"url":"https:\\/\\/acme.wd5.myworkdayjobs.com\\/en-US\\/External"}')
+        self.assertEqual(found_in_page(page), ['https://job-boards.greenhouse.io/acme', 'https://jobs.lever.co/acme-labs',
+                                               'https://acme.wd5.myworkdayjobs.com/External'])
+
+    def test_guessed_board_must_belong_to_the_company(self):
+        from resume.jobs import resolve
+        boards = {('greenhouse', 'acme'): (5, 'Acme'), ('greenhouse', 'acmecorp'): (9, 'Someone Else')}
+        with patch('resume.jobs.resolve.get_text', return_value='<html></html>'), \
+                patch('resume.jobs.resolve._count', side_effect=lambda kind, token: boards.get((kind, token), (0, ''))):
+            self.assertEqual(resolve.resolve('Acme', 'https://acme.com/careers', render=False)['url'],
+                             'https://job-boards.greenhouse.io/acme')
+            self.assertIsNone(resolve.resolve('Acme Corp', 'https://acmecorp.com/careers', render=False))
+
+    @patch('resume.jobs.sources.get_json')
+    def test_smartrecruiters_reader(self, get_json):
+        get_json.return_value = {'totalFound': 1, 'content': [{
+            'id': '77', 'name': 'Backend Engineer', 'releasedDate': '2026-10-23T07:00:19.336Z',
+            'location': {'fullLocation': 'Bengaluru, , India', 'country': 'in'},
+            'ref': 'https://api.smartrecruiters.com/v1/companies/Acme/postings/77'}]}
+        self.assertEqual(sources.detect('https://careers.smartrecruiters.com/Acme'), 'smartrecruiters')
+        job_ = sources.smartrecruiters('https://careers.smartrecruiters.com/Acme')[0]
+        self.assertEqual((job_['location'], job_['posted'], job_['url']),
+                         ('Bengaluru, India', '2026-10-23', 'https://jobs.smartrecruiters.com/Acme/77'))
+        get_json.return_value = {'jobAd': {'sections': {'jobDescription': {'text': '<p>Build APIs</p>'},
+                                                        'qualifications': {'text': '<li>2+ years</li>'}}}}
+        detail = sources.smartrecruiters_detail(job_)
+        self.assertEqual(detail['requirements'], '2+ years')
+
+
+class UpgradeTests(unittest.TestCase):
+    def test_page_source_is_upgraded_to_its_feed_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            service = JobService(root)
+            src = service.add_source('Acme', 'https://acme.com/careers', locations='India')
+            store = service.store
+            store.save_listing(src['id'], [dict(job('page-1'), location='Pune, India'), dict(job('page-2'), location='Pune, India')])
+            store.set_status(next(j['id'] for j in store.jobs() if j['url'].endswith('page-1')), 'applied')
+            found = {'url': 'https://job-boards.greenhouse.io/acme', 'kind': 'greenhouse', 'jobs': 3, 'evidence': 'x'}
+            calls = []
+            with patch('resume.jobs.service.resolve', side_effect=lambda *a, **k: calls.append(a) or found), \
+                    patch.dict(sources.READERS, {'greenhouse': lambda url: [dict(job('gh-1'), location='Pune, India')]}), \
+                    patch('resume.jobs.agents.shutil.which', return_value=None):
+                service.refresh({'experience': []}, lambda m: None)
+                service.refresh({'experience': []}, lambda m: None)
+            saved = store.sources()[0]
+            self.assertEqual((saved['kind'], saved['url'], saved['original_url']),
+                             ('greenhouse', 'https://job-boards.greenhouse.io/acme', 'https://acme.com/careers'))
+            self.assertEqual(len(calls), 1)  # not re-examined on the next refresh
+            jobs = {j['url']: j['status'] for j in store.jobs()}
+            # Switching feeds must retain both applied and unapplied saved jobs.
+            self.assertEqual(set(jobs), {'https://x.test/page-1', 'https://x.test/page-2', 'https://x.test/gh-1'})
+            self.assertEqual(jobs['https://x.test/page-1'], 'applied')
+
+    def test_workday_with_country_selects_city_values(self):
+        from resume.jobs import resolve
+        facets = [{'facetParameter': 'locationMainGroup', 'values': [{'facetParameter': 'locations', 'descriptor': 'Locations', 'values': [
+            {'descriptor': 'Pune, India', 'id': 'a'}, {'descriptor': 'Remote - Indiana', 'id': 'b'},
+            {'descriptor': 'IN KA Bengaluru', 'id': 'c'}, {'descriptor': 'London', 'id': 'd'}]}]}]
+        self.assertEqual(resolve._facet_values(facets, 'India'), ('locations', ['a', 'c']))
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@ import time
 from datetime import date, timedelta
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from .freshness import category, freshness, newest_first, posting_date
 from .imports import name_key, url_key
@@ -56,6 +57,14 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 STATUSES = ('new', 'seen', 'applied', 'hidden')
 
 
+def job_url_key(url):
+    parts = urlsplit(str(url or ''))
+    if (parts.hostname or '').endswith('.myworkdayjobs.com'):
+        path = re.sub(r'^/[a-z]{2}-[A-Z]{2}(?=/)', '', parts.path).rstrip('/')
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, '', ''))
+    return url_key(url) if url else ''
+
+
 def location_matches(location: str, locations: str) -> bool:
     terms = [part.strip().casefold() for part in locations.split(',') if part.strip()]
     if 'india' in terms:
@@ -90,6 +99,10 @@ class JobStore:
                 source_columns = {r['name'] for r in conn.execute('PRAGMA table_info(sources)')}
                 if 'locations' not in source_columns:
                     conn.execute("ALTER TABLE sources ADD COLUMN locations TEXT NOT NULL DEFAULT ''")
+                if 'original_url' not in source_columns:
+                    conn.execute("ALTER TABLE sources ADD COLUMN original_url TEXT NOT NULL DEFAULT ''")
+                if 'resolved_at' not in source_columns:
+                    conn.execute('ALTER TABLE sources ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0')
                 legacy_dates = 'relevant' not in columns
                 for name in ('relevant', 'relevance_reason'):
                     if name not in columns:
@@ -124,6 +137,36 @@ class JobStore:
         with self.db() as c:
             if not c.execute('UPDATE sources SET locations=? WHERE id=?', (locations, ident)).rowcount:
                 raise ValueError('This careers page is no longer saved.')
+
+    def note_resolve_attempt(self, ident: int) -> None:
+        with self.db() as c:
+            c.execute('UPDATE sources SET resolved_at=? WHERE id=?', (int(time.time()), ident))
+
+    def upgrade_source(self, ident: int, url: str, kind: str) -> dict | None:
+        """Point a careers page at the hiring platform feed found behind it.
+
+        The original link and every saved job/status are retained. Reconcile
+        page-link IDs to feed IDs by job URL when a later listing arrives.
+        """
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            if c.execute('SELECT 1 FROM sources WHERE url=? AND id!=?', (url, ident)).fetchone():
+                return None  # that feed is already a saved company of its own
+            c.execute("UPDATE sources SET original_url=CASE WHEN original_url='' THEN url ELSE original_url END, "
+                      'url=?, kind=?, resolved_at=?, last_error=NULL WHERE id=?', (url, kind, int(time.time()), ident))
+            row = c.execute('SELECT * FROM sources WHERE id=?', (ident,)).fetchone()
+            return dict(row) if row else None
+
+    def edit_source_url(self, ident, url, kind):
+        try:
+            with self.db() as c:
+                row = c.execute('SELECT url FROM sources WHERE id=?', (ident,)).fetchone()
+                if not row:
+                    raise ValueError('This careers page is no longer saved.')
+                c.execute("UPDATE sources SET original_url=CASE WHEN original_url='' THEN url ELSE original_url END, "
+                          'url=?,kind=?,resolved_at=0,last_error=NULL WHERE id=?', (url, kind, ident))
+        except sqlite3.IntegrityError:
+            raise ValueError('This career URL is already saved for another company.') from None
 
     def remove_source(self, ident: int) -> None:
         with self.db() as c:
@@ -160,6 +203,15 @@ class JobStore:
             c.execute('INSERT OR IGNORE INTO dismissed_jobs (source_id, external_id) VALUES (?, ?)',
                       (source_id, external_id))
 
+    def ids_by_external(self, source_id: int, external_ids) -> dict:
+        external_ids = list(external_ids)
+        if not external_ids:
+            return {}
+        with self.db() as c:
+            marks = ','.join('?' * len(external_ids))
+            return {r['external_id']: r['id'] for r in c.execute(
+                f'SELECT id, external_id FROM jobs WHERE source_id=? AND external_id IN ({marks})', (source_id, *external_ids))}
+
     def known_ids(self, source_id: int) -> set[str]:
         with self.db() as c:
             return {r[0] for r in c.execute('SELECT external_id FROM jobs WHERE source_id=? UNION '
@@ -172,12 +224,20 @@ class JobStore:
         now, new = int(time.time()), []
         with self.db() as c:
             seen = []
+            dismissed = {r[0] for r in c.execute('SELECT external_id FROM dismissed_jobs WHERE source_id=?', (source_id,))}
+            deleted_urls = {job_url_key(value) for value in dismissed if value.startswith(('https://', 'http://'))}
+            saved_urls = {job_url_key(r['url']): r['id'] for r in c.execute('SELECT id,url FROM jobs WHERE source_id=?', (source_id,)) if r['url']}
             for j in items:
-                if c.execute('SELECT 1 FROM dismissed_jobs WHERE source_id=? AND external_id=?',
-                             (source_id, j['external_id'])).fetchone():
+                canonical = job_url_key(j['url'])
+                if j['external_id'] in dismissed or (canonical and canonical in deleted_urls):
                     continue
                 row = c.execute('SELECT id FROM jobs WHERE source_id = ? AND external_id = ?',
                                 (source_id, j['external_id'])).fetchone()
+                if row is None and j['url']:
+                    ident = saved_urls.get(canonical)
+                    row = {'id': ident} if ident is not None else None
+                    if row:
+                        c.execute('UPDATE jobs SET external_id=? WHERE id=?', (j['external_id'], row['id']))
                 if row:
                     old = c.execute('SELECT title, requirements, description FROM jobs WHERE id=?', (row['id'],)).fetchone()
                     if old['title'] != j['title'] or (j['requirements'] and old['requirements'] != j['requirements']) or (j['description'] and old['description'] != j['description']):
@@ -189,6 +249,7 @@ class JobStore:
                               "description=COALESCE(NULLIF(?, ''), description) WHERE id=?",
                               (j['requirements'], j['description'], row['id']))
                     seen.append(row['id'])
+                    saved_urls[canonical] = row['id']
                 else:
                     self._seed_job_sequence(c)
                     c.execute("UPDATE meta SET value=MAX(CAST(value AS INTEGER), (SELECT COALESCE(MAX(id),0) FROM jobs))+1 WHERE key='job_id_sequence'")
@@ -199,6 +260,8 @@ class JobStore:
                                      j['requirements'], j['description'], now, now))
                     seen.append(cur.lastrowid)
                     new.append(cur.lastrowid)
+                    if canonical:
+                        saved_urls[canonical] = cur.lastrowid
             marks = ','.join('?' * len(seen))
             c.execute(f'UPDATE jobs SET active = 0 WHERE source_id = ?' + (f' AND id NOT IN ({marks})' if seen else ''),
                       (source_id, *seen))
@@ -223,7 +286,7 @@ class JobStore:
                 "SELECT * FROM jobs WHERE source_id=?", (source_id,))]
             source = c.execute('SELECT locations FROM sources WHERE id=?', (source_id,)).fetchone()
         locations = source['locations'] if source else ''
-        return sorted([r for r in rows if location_matches(r['location'], locations) and
+        return sorted([r for r in rows if r.get('relevant') != 'no' and location_matches(r['location'], locations) and
                        (freshness(r['posted']) == 'unknown'
                        or (r['active'] and not r['requirements'] and freshness(r['posted']) != 'expired'))],
                       key=lambda r: r['detail_attempted_at'])
@@ -276,14 +339,21 @@ class JobStore:
         # Never reuse a deleted ID: another open tab may still reference it.
         conn.execute("INSERT OR IGNORE INTO meta (key, value) SELECT 'job_id_sequence', COALESCE(MAX(id),0) FROM jobs")
 
+    @staticmethod
+    def _dismiss_row(conn, row):
+        values = {row['external_id']}
+        if row['url']:
+            values.add(job_url_key(row['url']))
+        conn.executemany('INSERT OR IGNORE INTO dismissed_jobs (source_id, external_id) VALUES (?, ?)',
+                         [(row['source_id'], value) for value in values])
+
     def delete_job(self, ident: int) -> None:
         with self.db() as c:
-            row = c.execute('SELECT source_id, external_id FROM jobs WHERE id=?', (ident,)).fetchone()
+            row = c.execute('SELECT source_id, external_id, url FROM jobs WHERE id=?', (ident,)).fetchone()
             if row is None:
                 raise ValueError('This job has already been deleted.')
             self._seed_job_sequence(c)
-            c.execute('INSERT OR IGNORE INTO dismissed_jobs (source_id, external_id) VALUES (?, ?)',
-                      (row['source_id'], row['external_id']))
+            self._dismiss_row(c, row)
             c.execute('DELETE FROM jobs WHERE id=?', (ident,))
 
     def delete_category(self, group):
@@ -294,20 +364,18 @@ class JobStore:
             rows = [dict(r) for r in c.execute('SELECT j.*, s.locations FROM jobs j JOIN sources s ON s.id=j.source_id')]
             for row in rows:
                 if category(row) == group and (row['status'] == 'applied' or location_matches(row['location'], row['locations'])):
-                    c.execute('INSERT OR IGNORE INTO dismissed_jobs (source_id, external_id) VALUES (?, ?)',
-                              (row['source_id'], row['external_id']))
+                    self._dismiss_row(c, row)
                     c.execute('DELETE FROM jobs WHERE id=?', (row['id'],))
 
     def prune_old(self, today=None):
         cutoff = (today or date.today()) - timedelta(days=8)
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')
-            rows = list(c.execute("SELECT id, source_id, external_id, posted FROM jobs WHERE status!='applied'"))
+            rows = list(c.execute("SELECT id, source_id, external_id, url, posted FROM jobs WHERE status!='applied'"))
             for row in rows:
                 posted = posting_date(row['posted'])
                 if posted is not None and posted < cutoff:
-                    c.execute('INSERT OR IGNORE INTO dismissed_jobs (source_id, external_id) VALUES (?, ?)',
-                              (row['source_id'], row['external_id']))
+                    self._dismiss_row(c, row)
                     c.execute("DELETE FROM jobs WHERE id=? AND status!='applied'", (row['id'],))
 
     def set_status(self, ident: int, status: str) -> None:

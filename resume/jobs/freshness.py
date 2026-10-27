@@ -31,6 +31,8 @@ def category(job):
     age = freshness(job.get('posted'))
     if age == 'expired':
         return 'old'
+    if job.get('relevant') == 'no' and job['status'] != 'hidden':
+        return 'no'
     if age == 'unknown' or job['status'] == 'hidden':
         return 'review'
     if job.get('eligible') == 'no' or job.get('relevant') == 'no':
