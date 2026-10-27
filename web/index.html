@@ -15,6 +15,7 @@
   <nav aria-label="Main navigation">
     <button class="nav active" data-view="workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg><span>Tailor resume</span></button>
     <button class="nav" data-view="jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Jobs</span></button>
+    <button class="nav" data-view="testlab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v5.2L4.8 17.5A2.4 2.4 0 0 0 7 21h10a2.4 2.4 0 0 0 2.2-3.5L14 8.2V3"/><path d="M7.5 14h9"/></svg><span>Test lab</span></button>
     <button class="nav" data-view="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span>My profile</span></button>
     <button class="nav" data-view="insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20v-8"/><path d="M12 20V5"/><path d="M18 20v-5"/></svg><span>Insights</span></button>
     <button class="nav" data-view="benchmarks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19a9 9 0 1 1 14 0"/><path d="M12 13l3.5-4.5"/></svg><span>Benchmarks</span></button>
@@ -216,19 +217,22 @@
     <button id="insights-unhide" class="text-button" hidden>Show hidden skills</button>
     <button id="insights-reset" class="text-button">Reset insights</button>
   </div>
+</section>
+
+<section id="testlab" class="view" hidden>
   <div class="page-title">
     <div class="eyebrow">VERIFY CHANGES CHEAPLY</div>
     <h1>The<br><em>test lab.</em></h1>
-    <p>Run a scaled-down collection to verify changes without burning your subscription: every saved job is cleared, then 20 direct-feed companies and 10 career-page companies are collected and AI-judged from scratch.</p>
+    <p>Run a scaled-down collection on a scratch database: your saved jobs, verdicts and Applied marks in Jobs are never touched. Each run starts empty, then 20 direct-feed companies and 10 career-page companies are collected and AI-judged.</p>
   </div>
   <article class="panel">
     <div class="panel-head">
       <h2>Test refresh</h2>
+      <button id="testlab-run" class="primary" type="button">Run test refresh ↻</button>
     </div>
-    <p class="hint">What happens: the whole jobs collection is emptied (your companies and their filters are kept), a backup of the cleared jobs is written to <code>.cache/jobs-before-test-refresh.sqlite3</code>, then only the 30-company slice runs. The activity popup follows the run live and the Jobs page fills as companies finish. Run <em>Refresh all</em> on the Jobs page afterwards to rebuild the full collection.</p>
+    <p class="hint">Your companies (with their filters) are copied into a throwaway <code>jobs.test.db</code>; only that scratch copy is filled and judged. The activity popup follows the run, and the results below appear as companies finish. Close the tab or run another test any time — your real collection stays as it is.</p>
+    <div id="testlab-results" hidden></div>
   </article>
-</section>
-
 </section>
 
 <section id="benchmarks" class="view" hidden>

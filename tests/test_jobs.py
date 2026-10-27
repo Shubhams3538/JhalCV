@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -369,7 +370,9 @@ class StoreAndServiceTests(unittest.TestCase):
         self.assertEqual([j['url'] for j in self.service.store.jobs()], [india['url']])
         self.service.store.save_listing(src['id'], [singapore])  # previously saved before a filter change
         self.assertEqual([j['url'] for j in self.service.store.jobs()], [india['url']])
-        self.assertEqual(self.service.store.unchecked(10), [])
+        # A hard-rule reject is final: the job is not queued for a later AI verdict.
+        # Only a rules PASS still waits for AI relevance (eligible set, relevant NULL).
+        self.assertEqual([j['title'] for j in self.service.store.unchecked(10)], [])
         with self.service.store.db() as c:
             singapore_id = c.execute("SELECT id FROM jobs WHERE external_id='singapore'").fetchone()['id']
         self.service.store.set_status(singapore_id, 'applied')

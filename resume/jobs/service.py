@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import random
 import threading
 import time
 from datetime import date
@@ -42,9 +43,10 @@ def title_matches(title: str, include: str, exclude: str) -> bool:
 
 
 class JobService:
-    def __init__(self, root):
+    def __init__(self, root, jobs_db='jobs.db'):
         self.root = Path(root)
-        self.store = JobStore(root)
+        self.store = JobStore(root, jobs_db)
+        self.scratch = jobs_db != 'jobs.db'  # a verification copy, never the saved collection
         self.benchmarks = Benchmarks(root)
         from ..usage import UsageStore
         self.usage = UsageStore(root)
@@ -112,18 +114,18 @@ class JobService:
         return self.store.import_sources(entries, self._locations(locations))
 
     # refresh
-    def start(self, profile: dict, recheck_only=False, source_ids=None) -> bool:
+    def start(self, profile: dict, recheck_only=False, source_ids=None, test=False) -> bool:
         with self._guard:
             if self.progress['running']:
                 return False
             self.progress = {'running': True, 'phase': 'review' if recheck_only else 'fetch',
-                             'message': 'Starting…', 'finished_at': None, 'error': None}
-        threading.Thread(target=self._background, args=(profile, recheck_only, source_ids), daemon=True).start()
+                             'test': bool(test), 'message': 'Starting…', 'finished_at': None, 'error': None}
+        threading.Thread(target=self._background, args=(profile, recheck_only, source_ids, test), daemon=True).start()
         return True
 
-    def _background(self, profile, recheck_only, source_ids):
+    def _background(self, profile, recheck_only, source_ids, test=False):
         try:
-            summary = self.refresh(profile, self._say, recheck_only=recheck_only, source_ids=source_ids)
+            summary = self.refresh(profile, self._say, recheck_only=recheck_only, source_ids=source_ids, test=test)
             self.progress.update(running=False, message=summary, finished_at=int(time.time()))
         except Exception as e:  # reported in the UI, never raised into the server
             self.progress.update(running=False, message='', error=str(e) or 'The refresh failed.',
@@ -132,10 +134,36 @@ class JobService:
     def _say(self, message):
         self.progress['message'] = message
 
-    def refresh(self, profile: dict, say=print, *, recheck_only=False, source_ids=None) -> str:
+    TEST_SLICE = (20, 10)  # direct + page companies a test refresh collects
+
+    def _test_reset(self):
+        """Start the verification run from a blank scratch database.
+
+        Only this service's own scratch store is emptied; the saved collection
+        in jobs.db is never opened for writing. The company list (and the
+        experience override) is copied in so the slice matches the real setup."""
+        self.store.reset_collection()
+        main = JobStore(self.root)
+        with main.db() as c:
+            rows = [dict(r) for r in c.execute(
+                'SELECT name, url, kind, include, exclude, locations FROM sources ORDER BY id')]
+            years = c.execute("SELECT value FROM meta WHERE key='experience_years'").fetchone()
+        for row in rows:
+            self.store.add_source(row['name'], row['url'], row['kind'],
+                                  row['include'], row['exclude'], row['locations'])
+        if years:
+            self.store.set_meta('experience_years', years['value'])
+
+    def refresh(self, profile: dict, say=print, *, recheck_only=False, source_ids=None, test=False) -> str:
         """Refresh every source, or only `source_ids` when given. Experience and
         relevance checks then cover only the refreshed sources' jobs, so a
-        partial refresh never spends agent usage on other companies."""
+        partial refresh never spends agent usage on other companies.
+
+        A test refresh runs only on the Test lab's scratch database: it starts
+        blank (companies copied in) and collects the small test slice, while
+        the saved collection stays exactly as it is."""
+        if test and not self.scratch:
+            raise ValueError('Test runs use the Test lab scratch database; the saved collection is never cleared.')
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
         try:
@@ -148,12 +176,15 @@ class JobService:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise RuntimeError('Another job refresh is already running.') from None
-            with self.benchmarks.run('review' if recheck_only else 'refresh'):
-                return self._refresh_locked(profile, say, recheck_only, source_ids)
+            if test and not recheck_only:
+                self._test_reset()
+            with self.benchmarks.run('test' if test and not recheck_only else
+                                     'review' if recheck_only else 'refresh'):
+                return self._refresh_locked(profile, say, recheck_only, source_ids, test)
         finally:
             os.close(fd)
 
-    def _refresh_locked(self, profile, say, recheck_only, source_ids):
+    def _refresh_locked(self, profile, say, recheck_only, source_ids, test=False):
         self.store.prune_old()
         agents = Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
         if recheck_only:
@@ -161,6 +192,22 @@ class JobService:
         found = new = 0
         failures = []
         chosen = [s for s in self.store.sources() if source_ids is None or s['id'] in source_ids]
+        limits = self.TEST_SLICE if (test and source_ids is None) else None
+        if limits:
+            # Testing budget: judge a random slice of each kind, so successive
+            # test runs cover different companies instead of the same first-N
+            # (the store lists them name-ordered, which would always favor the
+            # alphabetically first). Pools are id-sorted to keep the sample
+            # reproducible, and the pick is announced and lands in the run
+            # report through the per-company spans.
+            feeds, pages = limits
+            before = len(chosen)
+            feeds_pool = [s for s in sorted(chosen, key=lambda s: s['id']) if s['kind'] != 'page']
+            pages_pool = [s for s in sorted(chosen, key=lambda s: s['id']) if s['kind'] == 'page']
+            chosen = random.sample(feeds_pool, min(feeds, len(feeds_pool))) + \
+                     random.sample(pages_pool, min(pages, len(pages_pool)))
+            say(f'Test mode: {feeds} direct + {pages} page companies chosen at random '
+                f'({before - len(chosen)} skipped): ' + ', '.join(sorted(s['name'] for s in chosen)) + '.')
         if not recheck_only:
             active = {}
             completed = checked = 0
@@ -200,10 +247,10 @@ class JobService:
                         failures.append(failure)
                     completed = self.progress['completed']
                     say(f'{completed}/{len(chosen)} companies completed')
-                    # Publish verdicts as feeds finish, while other companies continue fetching.
+                    # Publish verdicts as each company finishes, while the slow
+                    # ones keep fetching: its jobs are usable immediately.
                     if checked < MAX_CHECKS:
-                        todo = [j for j in self.store.unchecked(MAX_CHECKS-checked, {futures[future]['id']})
-                                if j.get('posted') == date.today().isoformat()]
+                        todo = self.store.unchecked(MAX_CHECKS-checked, {futures[future]['id']})
                         if todo:
                             say(f'{completed}/{len(chosen)} companies completed; checking {len(todo)} jobs…')
                             self.store.set_eligibility(eligibility.check(todo, years, agents))
@@ -212,13 +259,14 @@ class JobService:
         self.store.prune_old()
         years = self.experience_years(profile)['years']
         checked = 0 if recheck_only else checked
-        todo = self.store.unchecked(MAX_CHECKS-checked, None if source_ids is None else {s['id'] for s in chosen})
+        scope = None if (source_ids is None and limits is None) else {s['id'] for s in chosen}
+        todo = self.store.unchecked(MAX_CHECKS-checked, scope)
         if todo:
             say(f'Checking relevance and experience for {len(todo)} job(s)…')
             self.store.set_eligibility(eligibility.check(todo, years, agents))
         self.store.set_meta('last_refresh', int(time.time()))
-        scope = '' if source_ids is None else ', '.join(s['name'] for s in chosen) + ': '
-        parts = [] if recheck_only else [f'{scope}{found} matching job(s), {new} new']
+        label = '' if (source_ids is None and limits is None) else ', '.join(s['name'] for s in chosen) + ': '
+        parts = [] if recheck_only else [f'{label}{found} matching job(s), {new} new']
         checked += len(todo)
         if checked:
             parts.append(f'{checked} checked by ' + (', '.join(NAMES[a] for a in agents.used) or 'text rules'))

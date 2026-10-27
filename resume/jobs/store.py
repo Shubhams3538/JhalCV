@@ -82,8 +82,8 @@ def matching_location_label(location: str, locations: str) -> str:
 
 
 class JobStore:
-    def __init__(self, root):
-        self.path = Path(root) / '.local' / 'jobs.db'
+    def __init__(self, root, filename='jobs.db'):
+        self.path = Path(root) / '.local' / filename
 
     @contextmanager
     def db(self):
@@ -178,6 +178,17 @@ class JobStore:
     def remove_source(self, ident: int) -> None:
         with self.db() as c:
             c.execute('DELETE FROM sources WHERE id = ?', (ident,))
+
+    def reset_collection(self) -> None:
+        """Empty the jobs collection for a from-scratch test run.
+
+        Sources, their filters and settings are kept; jobs, deletion
+        tombstones and run history start over blank."""
+        with self.db() as c:
+            c.execute('DELETE FROM jobs')
+            c.execute('DELETE FROM dismissed_jobs')
+            c.execute('UPDATE sources SET last_run_at=NULL, last_count=NULL, last_error=NULL')
+            c.execute("DELETE FROM meta WHERE key IN ('last_refresh', 'last_review')")
 
     def import_sources(self, rows, locations):
         """Insert one reviewed batch atomically; recheck duplicates at commit time."""

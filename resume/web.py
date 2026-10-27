@@ -40,6 +40,7 @@ class App:
         self.credentials = CredentialStore(root, include_env=include_env)
         self.insights = Insights(root)
         self.jobs = JobService(root)
+        self.jobs_test = JobService(root, jobs_db='jobs.test.db')  # Test lab scratch database
         self.usage = self.jobs.usage
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
@@ -48,7 +49,7 @@ class App:
     def state(self):
         return {'profile': self.store.profile(), 'settings': self.store.settings(),
                 'example': not self.store.profile_path.exists(),
-                'ai_available': bool(self.credentials.routes(self.store.settings()['model'])),
+                'ai_available': bool(self.credentials.routes(self.store.settings()['model'])) or bool(llm.cli_routes()),
                 'credentials': self.credentials.public(self.store.settings()['model']),
                 'profile_revision': self.profile_revision(),
                 'dependencies': {cmd: bool(shutil.which(cmd)) for cmd in ('typst', 'pdfinfo', 'pdftotext')},
@@ -189,13 +190,17 @@ class App:
             known = {s['id'] for s in self.jobs.store.sources()}
             if not known:
                 raise ValueError('Add a careers page first.')
+            test = bool(body.get('test'))
             chosen = body.get('sources')
             if chosen is not None:
                 if (not isinstance(chosen, list) or not chosen
                         or any(type(x) is not int or x not in known for x in chosen)):
                     raise ValueError('Choose at least one of your saved companies to refresh.')
                 chosen = set(chosen)
-            if not self.jobs.start(profile, source_ids=chosen):
+            if test:
+                chosen = None  # a test run always uses its own company slice
+            service = self.jobs_test if test else self.jobs
+            if not service.start(profile, source_ids=chosen, test=test):
                 raise ValueError('A refresh is already running.')
         elif path in ('/api/jobs/recheck', '/api/jobs/review'):
             if not self.jobs.start(profile, recheck_only=True):
@@ -325,7 +330,17 @@ def handler(app):
             if path == '/api/jobs/progress':
                 # The live activity watcher polls this every couple of seconds;
                 # it needs the run state, not the whole saved collection.
-                return self.reply(200, {'progress': dict(app.jobs.progress)})
+                return self.reply(200, {'progress': dict(app.jobs.progress),
+                                        'test_progress': dict(app.jobs_test.progress)})
+            if path == '/api/jobs/test':
+                # The Test lab's scratch collection: same shape as /api/jobs,
+                # always the throwaway database, never the saved one.
+                try:
+                    return self.reply(200, app.jobs_test.state(app.store.profile()))
+                except sqlite3.Error:
+                    return self.reply(400, {'error': 'The test database is busy or unreadable. Try again in a moment.'})
+                except (ValueError, OSError) as e:
+                    return self.reply(400, {'error': str(e)})
             if path == '/api/jobs':
                 try:
                     return self.reply(200, app.jobs.state(app.store.profile()))

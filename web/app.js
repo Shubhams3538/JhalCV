@@ -72,7 +72,8 @@ function updateActivity(progress) {
     el('div', {class: 'activity-head'}, [
       el('span', {class: 'activity-dot'}),
       el('span', {class: 'activity-title',
-        text: progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
+        text: progress.test ? 'Test refresh (scratch database)'
+          : progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
       el('button', {class: 'activity-close', type: 'button', title: 'Hide for this task', text: '✕',
         onclick: e => { e.stopPropagation(); activityDismissed = true; card.hidden = true; }})
     ])];
@@ -93,12 +94,54 @@ function scheduleActivity(delay) {
   activityTimer = setTimeout(pollActivity, delay);
 }
 
+let testLabPoll = null;
+const TEST_CATEGORY_LABELS = {eligible: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'],
+  notrel: ['NOT RELEVANT', 'missing'], review: ['NEEDS REVIEW', ''], old: ['OLD', ''], applied: ['APPLIED', '']};
+
+function renderTestLab(data) {
+  const wrap = $('#testlab-results');
+  const counts = {};
+  for (const job of data.jobs || []) counts[job.category] = (counts[job.category] || 0) + 1;
+  const parts = Object.entries(counts).map(([key, n]) => `${(TEST_CATEGORY_LABELS[key] || [key])[0]}: ${n}`);
+  wrap.replaceChildren(
+    el('p', {class: 'hint', text: (data.jobs || []).length
+      ? `${data.jobs.length} test job(s) — ` + parts.join(' · ') : 'No test jobs collected yet.'}));
+  const list = el('div', {class: 'testlab-list'});
+  for (const job of (data.jobs || []).slice(0, 300)) {
+    const [label, tone] = TEST_CATEGORY_LABELS[job.category] || [job.category, ''];
+    list.append(el('div', {class: 'testlab-job'}, [
+      el('span', {class: 'pill ' + tone, text: label}),
+      el('strong', {text: job.title}),
+      el('small', {text: job.company + (job.location ? ' · ' + job.location : '')}),
+    ]));
+  }
+  wrap.append(list);
+  wrap.hidden = false;
+}
+
+async function updateTestLab() {
+  const button = $('#testlab-run');
+  if (!button) return;
+  const revision = viewRevision;
+  clearTimeout(testLabPoll);
+  try {
+    const data = await api('jobs/test');
+    if (revision !== viewRevision) return;  // the user moved on to another page
+    button.disabled = Boolean(data.progress && data.progress.running);
+    if ((data.jobs && data.jobs.length) || (data.progress && data.progress.running)) renderTestLab(data);
+    if (data.progress && data.progress.running) testLabPoll = setTimeout(updateTestLab, 1500);
+  } catch { /* leave the button enabled; the server rejects concurrent starts */ }
+}
+
 async function pollActivity() {
   if (document.hidden) { scheduleActivity(ACTIVITY_IDLE_MS); return; }
   try {
     const data = await api('jobs/progress');
-    updateActivity(data.progress);
-    scheduleActivity(data.progress && data.progress.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
+    // A Test-lab run reports on the scratch service; show whichever is active.
+    const main = data.progress, test = data.test_progress;
+    const live = (main && main.running) ? main : (test && test.running) ? test : (main || test);
+    updateActivity(live);
+    scheduleActivity(live && live.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
   } catch { scheduleActivity(ACTIVITY_IDLE_MS); }
 }
 
@@ -275,7 +318,7 @@ async function saveProfile() {
   state.example = false;
   notify('Profile saved on this computer.');
 }
-const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', usage: 'Usage', benchmarks: 'Benchmarks', settings: 'Settings'};
+const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', testlab: 'Test lab', profile: 'My profile', insights: 'Insights', usage: 'Usage', benchmarks: 'Benchmarks', settings: 'Settings'};
 function rememberView(view, replace = false) {
   const hash = '#' + view + (view === 'jobs' ? '/' + jobsTab : '');
   if (location.hash !== hash) history[replace ? 'replaceState' : 'pushState'](null, '', hash);
@@ -297,6 +340,7 @@ function showView(view, remember = true, onJobs = null) {
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
   if (view === 'jobs') api('jobs').then(data => {if (revision === viewRevision) (onJobs || renderJobs)(data);}).catch(e => notify(e.message, true));
+  if (view === 'testlab') updateTestLab();
   if (view === 'benchmarks') loadBenchmark();
   if (view === 'usage') api('usage').then(renderUsage).catch(e => notify(e.message, true));
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
@@ -501,7 +545,8 @@ function returnToTailoredJob() {
 async function tailorForJob(job) {
   const context = {id: job.id, title: job.title, company: job.company, url: job.url, tab: jobsTab,
     search: $('#jobs-search').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
-    listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open, oldOpen: $('#jobs-old').open};
+    listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open,
+    notrelOpen: $('#jobs-notrel').open, oldOpen: $('#jobs-old').open};
   const detail = await api('jobs/detail', {id: job.id});
   if (!detail.description.trim()) throw new Error('This job has no description saved yet. Refresh, or open the job and paste its description.');
   $('#jd').value = `${detail.title} at ${detail.company}${detail.location ? ' (' + detail.location + ')' : ''}\n\n${detail.description}`.slice(0, 30000);
@@ -798,6 +843,14 @@ async function init() {
   $('#jobs-review-all').onclick = e => task(e.target, async () => renderJobs(await api('jobs/review', {})))
     .finally(() => {if (jobsData) renderJobs(jobsData);});
   $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
+  $('#testlab-run').onclick = e => {
+    if (!confirm('Run a 30-company test collection on a scratch database? Your saved jobs in Jobs are not touched.')) return;
+    task(e.target, async () => {
+      await api('jobs/refresh', {test: true});
+      notify('Test refresh started on the scratch database — results appear below.');
+      updateTestLab();
+    });
+  };
   $('#jobs-refresh-selected').onclick = e => task(e.target, async () => {
     renderJobs(await api('jobs/refresh', {sources: [...refreshPick]}));
     syncRefreshSelected();
