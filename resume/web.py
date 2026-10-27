@@ -14,7 +14,7 @@ import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from . import llm
 from .credentials import CredentialStore, PROVIDERS
@@ -206,6 +206,10 @@ class App:
             self.jobs.store.delete_job(ident())
         elif path == '/api/jobs/status':
             self.jobs.store.set_status(ident(), body.get('status'))
+        elif path == '/api/jobs/eligibility':
+            if 'eligible' not in body:
+                raise ValueError('Choose a manual eligibility decision.')
+            self.jobs.store.set_manual_eligibility(ident(), body['eligible'])
         elif path == '/api/jobs/experience':
             self.jobs.set_experience_years(body.get('years'))
         else:
@@ -310,6 +314,14 @@ def handler(app):
                     return self.reply(200, app.usage.summary())
                 except (sqlite3.Error, OSError):
                     return self.reply(503, {'error': 'Usage accounting is currently unavailable.'})
+            if path == '/api/benchmarks':
+                try:
+                    ident = parse_qs(urlsplit(self.path).query).get('run', [None])[0]
+                    return self.reply(200, app.jobs.benchmarks.report(ident))
+                except ValueError as e:
+                    return self.reply(400, {'error': str(e)})
+                except OSError:
+                    return self.reply(503, {'error': 'Timing reports are currently unavailable.'})
             if path == '/api/jobs':
                 try:
                     return self.reply(200, app.jobs.state(app.store.profile()))
@@ -347,7 +359,9 @@ def handler(app):
 
         def do_POST(self):
             origin = f'http://127.0.0.1:{self.server.server_port}'
-            if not self.trusted_host() or self.headers.get('Origin', origin) != origin or not secrets.compare_digest(self.headers.get('X-App-Token', ''), app.token):
+            # Bytes keep the comparison safe for any header value a client sends.
+            token = (self.headers.get('X-App-Token') or '').encode('latin-1')
+            if not self.trusted_host() or self.headers.get('Origin', origin) != origin or not secrets.compare_digest(token, app.token.encode()):
                 return self.reply(403, {'error': 'Reload the local app before trying again.'})
             try:
                 length = int(self.headers.get('Content-Length', '0'))

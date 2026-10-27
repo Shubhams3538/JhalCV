@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .freshness import category, freshness, newest_first, posting_date
+from .metrics import measure
 from .imports import name_key, url_key
 
 SCHEMA = """
@@ -86,6 +87,12 @@ class JobStore:
 
     @contextmanager
     def db(self):
+        with measure('database'):
+            with self._db() as conn:
+                yield conn
+
+    @contextmanager
+    def _db(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
@@ -104,7 +111,7 @@ class JobStore:
                 if 'resolved_at' not in source_columns:
                     conn.execute('ALTER TABLE sources ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0')
                 legacy_dates = 'relevant' not in columns
-                for name in ('relevant', 'relevance_reason'):
+                for name in ('relevant', 'relevance_reason', 'manual_eligible'):
                     if name not in columns:
                         conn.execute(f'ALTER TABLE jobs ADD COLUMN {name} TEXT')
                 if legacy_dates:
@@ -286,7 +293,8 @@ class JobStore:
                 "SELECT * FROM jobs WHERE source_id=?", (source_id,))]
             source = c.execute('SELECT locations FROM sources WHERE id=?', (source_id,)).fetchone()
         locations = source['locations'] if source else ''
-        return sorted([r for r in rows if r.get('relevant') != 'no' and location_matches(r['location'], locations) and
+        return sorted([r for r in rows if r.get('manual_eligible') != 'no' and r.get('relevant') != 'no'
+                       and (not r['location'] or location_matches(r['location'], locations)) and
                        (freshness(r['posted']) == 'unknown'
                        or (r['active'] and not r['requirements'] and freshness(r['posted']) != 'expired'))],
                       key=lambda r: r['detail_attempted_at'])
@@ -301,7 +309,7 @@ class JobStore:
             rows = [dict(r) for r in c.execute(
                 "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
                 "FROM jobs j JOIN sources s ON s.id=j.source_id "
-                "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden'")]
+                "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden' AND j.manual_eligible IS NULL")]
         rows = [r for r in rows if (source_ids is None or r['source_id'] in source_ids)
                 and (r['status'] == 'applied' or location_matches(r['location'], r['locations']))]
         return newest_first(rows)[:limit]
@@ -319,7 +327,7 @@ class JobStore:
         with self.db() as c:
             rows = [{**dict(r), 'freshness': freshness(r['posted'])} for r in c.execute(
                 'SELECT j.id, j.title, j.location, j.url, j.posted, j.first_seen_at, j.status, j.min_years, j.eligible, '
-                'j.reason, j.checked_by, j.relevant, j.relevance_reason, j.active, s.name AS company, s.id AS source_id, s.locations '
+                'j.reason, j.checked_by, j.relevant, j.relevance_reason, j.manual_eligible, j.active, s.name AS company, s.id AS source_id, s.locations '
                 'FROM jobs j JOIN sources s ON s.id = j.source_id ORDER BY j.id DESC')]
         return [{**r, 'location': matching_location_label(r['location'], r['locations'])
                  if r['status'] != 'applied' else r['location'], 'category': category(r)}
@@ -377,6 +385,13 @@ class JobStore:
                 if posted is not None and posted < cutoff:
                     self._dismiss_row(c, row)
                     c.execute("DELETE FROM jobs WHERE id=? AND status!='applied'", (row['id'],))
+
+    def set_manual_eligibility(self, ident: int, verdict) -> None:
+        if verdict not in ('no', None):
+            raise ValueError('Choose not eligible, or undo the manual decision.')
+        with self.db() as c:
+            if not c.execute('UPDATE jobs SET manual_eligible=? WHERE id=?', (verdict, ident)).rowcount:
+                raise ValueError('This job is no longer saved.')
 
     def set_status(self, ident: int, status: str) -> None:
         if status not in STATUSES:

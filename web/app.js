@@ -1,11 +1,23 @@
 'use strict';
 const $ = s => document.querySelector(s);
+// URLs from external boards may be anything; only web links may become
+// clickable targets in this origin.
+const safeUrl = v => {
+  try {
+    const u = new URL(v, location.href);
+    return ['http:', 'https:'].includes(u.protocol) ? u.href : null;
+  } catch { return null; }
+};
 const el = (tag, props = {}, children = []) => {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (k === 'text') node.textContent = v;
     else if (k === 'class') node.className = v;
     else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (k === 'href' || k === 'src') {
+      const safe = safeUrl(v);
+      if (safe) node[k] = safe;
+    }
     else if (k in node) node[k] = v;
     else node.setAttribute(k, v);
   }
@@ -25,6 +37,71 @@ function notify(message, error = false) {
   // Errors stay a little longer so there is time to read them.
   noticeTimer = setTimeout(() => { notice.hidden = true; }, error ? 8000 : 5000);
 }
+// Live activity popup: whatever page the user is on, show what the app is doing.
+const ACTIVITY_IDLE_MS = 8000, ACTIVITY_ACTIVE_MS = 1500, ACTIVITY_DONE_MS = 6000;
+let activityTimer = null, activityHideTimer = null, activityWasRunning = false, activityDismissed = false;
+
+function updateActivity(progress) {
+  const card = $('#activity');
+  if (!progress || !progress.running) {
+    activityDismissed = false;  // a dismissal covers one task only
+    if (activityWasRunning) {
+      activityWasRunning = false;
+      if (activityDismissed) { card.hidden = true; return; }
+      card.className = 'activity ' + (progress && progress.error ? 'error' : 'done');
+      card.replaceChildren(el('div', {class: 'activity-head'}, [
+        el('span', {class: 'activity-dot'}),
+        el('span', {class: 'activity-title', text: progress && progress.error ? 'Task failed' : 'Task finished'}),
+        el('button', {class: 'activity-close', type: 'button', title: 'Hide', text: '✕',
+          onclick: e => { e.stopPropagation(); clearTimeout(activityHideTimer); card.hidden = true; }})
+      ]), el('div', {class: 'activity-message',
+        text: (progress && (progress.error || progress.message)) || 'Done.'}));
+      clearTimeout(activityHideTimer);
+      activityHideTimer = setTimeout(() => { card.hidden = true; }, ACTIVITY_DONE_MS);
+    }
+    return;
+  }
+  if (activityDismissed) return;
+  activityWasRunning = true;
+  clearTimeout(activityHideTimer);
+  const total = Number(progress.total) || 0;
+  const done = Math.min(Number(progress.completed) || 0, total);
+  const active = (progress.active || []).slice(0, 4);
+  const more = (progress.active || []).length - active.length;
+  const children = [
+    el('div', {class: 'activity-head'}, [
+      el('span', {class: 'activity-dot'}),
+      el('span', {class: 'activity-title',
+        text: progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
+      el('button', {class: 'activity-close', type: 'button', title: 'Hide for this task', text: '✕',
+        onclick: e => { e.stopPropagation(); activityDismissed = true; card.hidden = true; }})
+    ])];
+  if (total) children.push(el('div', {class: 'activity-bar'},
+    [el('div', {class: 'activity-fill', style: `width:${Math.round(done / total * 100)}%`})]));
+  children.push(el('div', {class: 'activity-message', text: progress.message || 'Starting…'}));
+  if (active.length || more > 0) children.push(el('div', {class: 'activity-chips'}, [
+    ...active.map(name => el('span', {text: name})),
+    ...(more > 0 ? [el('span', {text: `+${more} more`})] : [])]));
+  card.className = 'activity';
+  card.replaceChildren(...children);
+  card.onclick = () => showView('jobs');
+  card.hidden = false;
+}
+
+function scheduleActivity(delay) {
+  clearTimeout(activityTimer);
+  activityTimer = setTimeout(pollActivity, delay);
+}
+
+async function pollActivity() {
+  if (document.hidden) { scheduleActivity(ACTIVITY_IDLE_MS); return; }
+  try {
+    const data = await api('jobs');
+    updateActivity(data.progress);
+    scheduleActivity(data.progress && data.progress.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
+  } catch { scheduleActivity(ACTIVITY_IDLE_MS); }
+}
+
 async function api(path, body) {
   const response = await fetch('/api/' + path, body === undefined ? {} : {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-App-Token': state.token}, body: JSON.stringify(body)
@@ -336,6 +413,7 @@ function renderJobs(data) {
   $('#jobs-review').hidden = jobsTab !== 'eligible';
   $('#jobs-old').hidden = jobsTab !== 'eligible';
   renderJobList();
+  updateActivity(data.progress);
   clearTimeout(jobsPoll);
   if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
 }
@@ -752,6 +830,7 @@ async function init() {
 
   window.addEventListener('hashchange', restoreView);
   restoreView();
+  scheduleActivity(ACTIVITY_IDLE_MS);  // watch for background tasks on every page
   $('#insights-unhide').onclick = e => task(e.target, async () => renderInsights((await api('insights/unhide', {})).insights));
   $('#insights-reset').onclick = e => {
     if (!confirm('Clear every analyzed job and hidden skill from Insights? Your profile is not changed.')) return;

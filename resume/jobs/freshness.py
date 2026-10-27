@@ -31,12 +31,14 @@ def category(job):
     age = freshness(job.get('posted'))
     if age == 'expired':
         return 'old'
-    if job.get('relevant') == 'no' and job['status'] != 'hidden':
+    if job.get('manual_eligible') == 'no':
         return 'no'
-    if age == 'unknown' or job['status'] == 'hidden':
+    if job['status'] == 'hidden':
         return 'review'
     if job.get('eligible') == 'no' or job.get('relevant') == 'no':
         return 'no'
     if job.get('eligible') == 'yes' and job.get('relevant') == 'yes':
+        # Some sites publish no posting date. A job that passes both checks is
+        # still shown as Eligible; the list labels its date as unverified.
         return 'eligible'
     return 'review'
