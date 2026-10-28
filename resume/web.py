@@ -197,7 +197,7 @@ class App:
                 chosen = set(chosen)
             if not self.jobs.start(profile, source_ids=chosen):
                 raise ValueError('A refresh is already running.')
-        elif path == '/api/jobs/recheck':
+        elif path in ('/api/jobs/recheck', '/api/jobs/review'):
             if not self.jobs.start(profile, recheck_only=True):
                 raise ValueError('A refresh is already running.')
         elif path == '/api/jobs/delete-all':

@@ -110,7 +110,8 @@ class JobService:
         with self._guard:
             if self.progress['running']:
                 return False
-            self.progress = {'running': True, 'message': 'Starting…', 'finished_at': None, 'error': None}
+            self.progress = {'running': True, 'phase': 'review' if recheck_only else 'fetch',
+                             'message': 'Starting…', 'finished_at': None, 'error': None}
         threading.Thread(target=self._background, args=(profile, recheck_only, source_ids), daemon=True).start()
         return True
 
@@ -143,6 +144,8 @@ class JobService:
                 raise RuntimeError('Another job refresh is already running.') from None
             self.store.prune_old()
             agents = Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
+            if recheck_only:
+                return self._review_saved(profile, agents, say, source_ids)
             found = new = 0
             failures = []
             chosen = [s for s in self.store.sources() if source_ids is None or s['id'] in source_ids]
@@ -150,7 +153,7 @@ class JobService:
                 active = {}
                 completed = checked = 0
                 years = self.experience_years(profile)['years']
-                self.progress.update(total=len(chosen), completed=0, active=[], started_at=int(time.time()))
+                self.progress.update(phase='fetch', total=len(chosen), completed=0, active=[], started_at=int(time.time()))
                 # Direct feeds finish first; slow rendered pages cannot hold up the entire queue.
                 chosen.sort(key=lambda src: src['kind'] == 'page')
                 with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
@@ -210,6 +213,26 @@ class JobService:
             return text[:1].upper() + text[1:] + '.' if parts else 'Nothing to check.'
         finally:
             os.close(fd)
+
+    def _review_saved(self, profile, agents, say, source_ids=None):
+        # Snapshot the queue once: uncertain answers must never create an
+        # endless retry loop, and jobs arriving later belong to the next run.
+        todo = self.store.unchecked(None, source_ids)
+        total = len(todo)
+        self.progress.update(phase='review', total=total, completed=0, active=[], started_at=int(time.time()))
+        years = self.experience_years(profile)['years']
+        chunk = eligibility.BATCH * 3
+        for offset in range(0, total, chunk):
+            batch = todo[offset:offset+chunk]
+            say(f'Reviewing saved jobs: {offset}/{total} completed…')
+            self.store.set_eligibility(eligibility.check(batch, years, agents))
+            self.progress['completed'] = offset + len(batch)
+            say(f'Reviewing saved jobs: {self.progress["completed"]}/{total} completed…')
+        self.store.set_meta('last_review', int(time.time()))
+        if not total:
+            return 'No unreviewed saved jobs.'
+        by = ', '.join(NAMES[a] for a in agents.used) or 'text rules'
+        return f'Reviewed {total} saved job(s) using {by}. Uncertain matches or dates remain in Needs review.'
 
     def _upgrade_page_source(self, src):
         """Look for the hiring platform behind a careers page, at most every two weeks."""
@@ -320,4 +343,5 @@ class JobService:
                 'jobs': self.store.jobs(), 'progress': dict(self.progress),
                 'experience': self.experience_years(profile),
                 'last_refresh': self.store.get_meta('last_refresh'),
+                'unreviewed_count': len(self.store.unchecked(None)),
                 'agents': [NAMES[a] for a in Agents().order]}

@@ -84,6 +84,21 @@ class WebTests(unittest.TestCase):
             self.request('/api/jobs/sources/url', {'id': source['id'], 'url': 'http://127.0.0.1/'}, headers)
         self.assertEqual(error.exception.code, 400)
 
+    def test_review_saved_jobs_endpoint_authentication_and_mode(self):
+        body = {}
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/jobs/review', body, {'Content-Type': 'application/json'})
+        self.assertEqual(error.exception.code, 403)
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        with patch.object(self.app.jobs, 'start', return_value=True) as start:
+            result = self.request('/api/jobs/review', body, headers)
+        start.assert_called_once_with(self.app.store.profile(), recheck_only=True)
+        self.assertIn('unreviewed_count', result)
+        with patch.object(self.app.jobs, 'start', return_value=False):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request('/api/jobs/review', body, headers)
+        self.assertEqual(error.exception.code, 400)
+
     def test_jobs_endpoints(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
         state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)

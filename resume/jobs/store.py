@@ -296,7 +296,7 @@ class JobStore:
             c.execute('UPDATE jobs SET detail_attempted_at=? WHERE source_id=? AND external_id=?',
                       (time.time_ns(), source_id, external_id))
 
-    def unchecked(self, limit: int, source_ids=None) -> list[dict]:
+    def unchecked(self, limit: int | None, source_ids=None) -> list[dict]:
         with self.db() as c:
             rows = [dict(r) for r in c.execute(
                 "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "

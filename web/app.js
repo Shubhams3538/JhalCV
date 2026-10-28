@@ -306,14 +306,18 @@ function renderJobs(data) {
   const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
   const active = (data.progress.active || []).join(', ');
   const progress = data.progress.total != null
-    ? `${data.progress.completed || 0}/${data.progress.total} companies completed${active ? ' · Active: ' + active : ''}. ${data.progress.message}`
+    ? `${data.progress.completed || 0}/${data.progress.total} ${data.progress.phase === 'review' ? 'jobs reviewed' : 'companies completed'}${active ? ' · Active: ' + active : ''}. ${data.progress.message}`
     : data.progress.message;
   $('#jobs-progress').textContent = running ? progress
     : data.progress.error ? 'Last refresh failed: ' + data.progress.error
     : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
   $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
   $('#jobs-refresh').disabled = running;
-  $('#jobs-refresh').textContent = running ? 'Refreshing…' : 'Refresh all ↻';
+  $('#jobs-refresh').textContent = running && data.progress.phase !== 'review' ? 'Refreshing…' : 'Refresh all ↻';
+  const pending = data.unreviewed_count ?? data.jobs.filter(j => !j.relevant || !j.eligible).length;
+  $('#jobs-review-all').disabled = running || pending === 0;
+  $('#jobs-review-all').textContent = running && data.progress.phase === 'review'
+    ? 'Reviewing saved jobs…' : `Review unreviewed jobs (${pending})`;
   syncRefreshSelected();
   const tabs = $('#jobs-tabs'); tabs.replaceChildren();
   for (const [id, name] of JOB_TABS) {
@@ -609,6 +613,8 @@ async function init() {
     renderJobs(result.state);
     notify(`${result.imported} companies imported. ${result.skipped} duplicates skipped. Select companies to refresh when ready.`);
   });
+  $('#jobs-review-all').onclick = e => task(e.target, async () => renderJobs(await api('jobs/review', {})))
+    .finally(() => {if (jobsData) renderJobs(jobsData);});
   $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
   $('#jobs-refresh-selected').onclick = e => task(e.target, async () => {
     renderJobs(await api('jobs/refresh', {sources: [...refreshPick]}));
