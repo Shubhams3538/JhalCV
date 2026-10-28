@@ -13,6 +13,7 @@ from .usage import UsageStore, usage_scope
 from pathlib import Path
 
 from .render import fit, RenderError
+from .storage import atomic_json
 from .tailor import tailor
 from .verify import verify
 
@@ -24,6 +25,15 @@ GREEN, RED, YELLOW, DIM, BOLD, RESET = (
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40]
+
+
+def _plain(value) -> str:
+    """Model-derived text must never carry terminal control sequences: whole
+    escape sequences are removed, since their payloads are printable."""
+    text = str(value or "")
+    text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
+    text = re.sub(r"\x1b\[[0-9;:?]*[ -/]*[@-~]", "", text)
+    return re.sub(r"[\x00-\x1f\x7f]", "", text)
 
 
 def _accounted(function):
@@ -53,9 +63,9 @@ def cmd_make(args) -> int:
         # whether a silent fallback is acceptable.
         from .llm_tailor import tailor_llm
         data, report = tailor_llm(profile, jd_text, model=args.model, **kw)
-        if args.tailorer == "llm" and report["tailorer"] != "llm":
-            print(f"  {RED}✗ llm unavailable: {report['llm'].get('reason')}{RESET}")
-            return 1
+    if args.tailorer == "llm" and report["tailorer"] != "llm":
+        print(f"  {RED}✗ llm unavailable: {_plain(report['llm'].get('reason'))}{RESET}")
+        return 1
 
     info = report.get("llm", {})
     if report["tailorer"] == "llm":
@@ -64,9 +74,9 @@ def cmd_make(args) -> int:
         print(f"  {GREEN}llm{RESET} {DIM}{info.get('model')} "
               f"({'cached' if marks.islower() else 'called'}){RESET}")
         if info.get("summary"):
-            print(f"  {DIM}reads as:{RESET} {info['summary']}")
+            print(f"  {DIM}reads as:{RESET} {_plain(info['summary'])}")
     elif info.get("reason"):
-        print(f"  {YELLOW}fell back to rules:{RESET} {DIM}{info['reason']}{RESET}")
+        print(f"  {YELLOW}fell back to rules:{RESET} {DIM}{_plain(info.get('reason'))}{RESET}")
 
     top = list(report["angle_scores"].items())[:4]
     print(f"  {DIM}angles:{RESET} " + ", ".join(f"{a} {s:.0%}" for a, s in top if s))
@@ -74,7 +84,7 @@ def cmd_make(args) -> int:
         if d.get("section") != "projects":
             continue
         if d.get("by") == "llm":
-            print(f"  {DIM}project:{RESET} {d['name']} {DIM}({d['angle']}) — {d.get('why','')}{RESET}")
+            print(f"  {DIM}project:{RESET} {d['name']} {DIM}({d['angle']}) — {_plain(d.get('why',''))}{RESET}")
         elif "name" in d:
             print(f"  {DIM}project:{RESET} {d['name']} "
                   f"{DIM}(score {d['score']:.2f}, angle: {d['angle']}){RESET}")
@@ -82,7 +92,7 @@ def cmd_make(args) -> int:
             for pr in d["not_selected"]:
                 print(f"  {DIM}  skipped: {pr['name']} (score {pr['score']:.2f}){RESET}")
     for fix in info.get("repairs", []):
-        print(f"  {YELLOW}repaired:{RESET} {DIM}{fix}{RESET}")
+        print(f"  {YELLOW}repaired:{RESET} {DIM}{_plain(fix)}{RESET}")
 
     name = args.out or f"{date.today():%Y-%m-%d}_{_slug(jd_path.stem)}"
     out_pdf = ROOT / "build" / f"{name}.pdf"
@@ -121,9 +131,10 @@ def cmd_make(args) -> int:
         print(f"{BOLD}▸ gaps{RESET} {DIM}(in JD, not in your profile — not on the PDF){RESET}")
         print(f"  {YELLOW}{', '.join(report['gap_skills'])}{RESET}")
 
-    # Sidecar: what was claimed, to whom, from which JD.
+    # Sidecar: what was claimed, to whom, from which JD. It carries the raw JD
+    # text, so it is written user-only and atomically like other local secrets.
     sidecar = ROOT / "build" / f"{name}.report.json"
-    sidecar.write_text(json.dumps({
+    atomic_json(sidecar, {
         "generated": date.today().isoformat(),
         "jd_file": str(jd_path),
         "jd_text": jd_text,
@@ -131,7 +142,7 @@ def cmd_make(args) -> int:
         "report": report,
         "fit": result,
         "verify_failures": fails,
-    }, indent=2))
+    })
 
     print(f"\n{GREEN}→{RESET} {out_pdf}")
     print(f"{DIM}  {sidecar.name} · {name}.data.json{RESET}")

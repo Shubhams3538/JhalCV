@@ -18,7 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 import html
 import re
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from xml.etree import ElementTree
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from .freshness import freshness, newest_first
 from .fetch import FetchError, browser, get_json, get_text, html_to_text, page_with_links, post_json, render_page
@@ -29,7 +30,8 @@ MAX_JOBS = 300
 
 LABELS = {'google': 'Google Careers', 'amazon': 'Amazon Jobs', 'workday': 'Workday',
           'greenhouse': 'Greenhouse', 'lever': 'Lever', 'ashby': 'Ashby', 'smartrecruiters': 'SmartRecruiters',
-          'oracle': 'Oracle Recruiting', 'jibe': 'Jibe / iCIMS', 'page': 'AI page reader'}
+          'oracle': 'Oracle Recruiting', 'jibe': 'Jibe / iCIMS', 'pcsx': 'Eightfold board',
+          'salesforce': 'Salesforce', 'keka': 'Keka', 'kula': 'Kula', 'page': 'AI page reader'}
 
 
 def detect(url: str) -> str:
@@ -51,6 +53,14 @@ def detect(url: str) -> str:
         return 'smartrecruiters'
     if host.endswith('.oraclecloud.com') and '/hcmUI/CandidateExperience/' in path:
         return 'oracle'
+    if host == 'careers.qualcomm.com' or host.endswith('.eightfold.ai'):
+        return 'pcsx'
+    if host in ('www.salesforce.com', 'salesforce.com') and '/careers/jobs' in path:
+        return 'salesforce'
+    if host.endswith('.keka.com'):
+        return 'keka'
+    if host == 'careers.kula.ai':
+        return 'kula'
     return 'page'
 
 
@@ -74,6 +84,10 @@ def _date(value) -> str:
 
 
 def _job(external_id, title, location='', url='', posted='', requirements='', description=''):
+    # Only web links may be stored: page-controlled URLs (JSON-LD, feeds) must
+    # never hand a javascript: or file: target to the browser or a later fetch.
+    link = urlsplit(str(url or '').strip())
+    url = str(url or '').strip() if link.scheme in ('http', 'https') and link.hostname else ''
     return {'external_id': str(external_id), 'title': ' '.join(str(title or '').split())[:300],
             'location': ' '.join(str(location or '').split())[:300], 'url': url, 'posted': posted,
             'requirements': requirements[:20000], 'description': description[:30000]}
@@ -232,7 +246,7 @@ def workday_detail(item: dict) -> dict:
 def greenhouse(url: str) -> list[dict]:
     parts = urlsplit(url)
     token = dict(parse_qsl(parts.query)).get('for') or next((s for s in parts.path.split('/') if s and s != 'embed'), '')
-    if not token:
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', token or ''):
         raise FetchError('Use the company Greenhouse board URL, e.g. https://job-boards.greenhouse.io/company.')
     data = get_json(f'https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true')
     out = []
@@ -248,6 +262,8 @@ def greenhouse(url: str) -> list[dict]:
 def lever(url: str) -> list[dict]:
     parts = urlsplit(url)
     company = next((s for s in parts.path.split('/') if s), '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', company):
+        raise FetchError('Use the company Lever board URL, e.g. https://jobs.lever.co/company.')
     api = 'api.eu.lever.co' if parts.hostname == 'jobs.eu.lever.co' else 'api.lever.co'
     out = []
     for j in get_json(f'https://{api}/v0/postings/{company}?mode=json') or []:
@@ -311,8 +327,8 @@ def _json_ld_jobs(page: str, base: str) -> list[dict]:
                 description = '\n\n'.join(x for x in (about, duties and 'Responsibilities\n' + duties,
                                                      quals and 'Qualifications\n' + quals) if x)
                 jobs.append(_job(item.get('identifier', {}).get('value') if isinstance(item.get('identifier'), dict) else item.get('url') or item.get('title'),
-                                 item.get('title'), '; '.join(names), item.get('url') or base, _date(item.get('datePosted')),
-                                 quals or description, description))
+                                 item.get('title'), '; '.join(names), urljoin(base, str(item.get('url') or '')) or base,
+                                 _date(item.get('datePosted')), quals or description, description))
     return jobs
 
 
@@ -351,8 +367,81 @@ def _blocked_page(page):
                                    html_to_text(title.group(1)), re.I))
 
 
+def nutanix_jobs(url: str) -> list[dict]:
+    """Nutanix's public Jobvite board plus its employer XML feed.
+
+    Intersect the feed with the public board: the feed also contains jobs
+    that are not publicly listed. Keep filters from the saved careers URL.
+    """
+    filters = {}
+    for key, value in parse_qsl(urlsplit(url).query):
+        if key not in ('country', 'team', 'location', 'search', 'pagesize', 'page'):
+            raise FetchError('The Nutanix reader cannot preserve the "' + key + '" filter. Use country, team, location or search filters.')
+        filters.setdefault(key, []).append(value.casefold().strip())
+    board = get_text('https://jobs.jobvite.com/nutanix/jobs')
+    public = set(re.findall(r'href=["\']/nutanix/job/([A-Za-z0-9_-]+)["\']', board))
+    if not public:
+        raise FetchError('Nutanix’s public Jobvite board returned no readable jobs; saved jobs were kept.')
+    # The board truncates each category and links to "Show More". Search
+    # pages then use ordinary numbered pagination; never silently stop there.
+    pending, visited = [board], set()
+    while pending:
+        page = pending.pop()
+        for raw in re.findall(r'href=["\'](/nutanix/search\??[^"\']*|/nutanix/search/[^"\']*)["\']', page):
+            path = html.unescape(raw)
+            selected = dict(parse_qsl(urlsplit(path).query)).get('c', '').casefold()
+            if filters.get('team') and selected and selected not in filters['team']:
+                continue
+            if path in visited:
+                continue
+            if len(visited) >= 20:
+                raise FetchError('Nutanix pagination exceeded the reader limit; saved jobs were kept.')
+            visited.add(path)
+            extra = get_text('https://jobs.jobvite.com' + path)
+            ids = set(re.findall(r'href=["\']/nutanix/job/([A-Za-z0-9_-]+)["\']', extra))
+            if not ids:
+                raise FetchError('A Nutanix listings page could not be read; saved jobs were kept.')
+            public.update(ids)
+            pending.append(extra)
+    try:
+        feed = ElementTree.fromstring(get_text('https://jobs.jobvite.com/CompanyJobs/Xml.aspx?c=qKr9VfwZ'))
+    except ElementTree.ParseError:
+        raise FetchError('Nutanix’s public job feed did not return readable job data.') from None
+    if feed.tag != 'result' or not feed.findall('job'):
+        raise FetchError('Nutanix’s public job feed returned no readable jobs; saved jobs were kept.')
+    found = {}
+    for row in feed.findall('job'):
+        value = lambda key: (row.findtext(key) or '').strip()
+        ident, location = value('id'), value('location')
+        if ident not in public:
+            continue
+        if filters.get('country') and location.rsplit(',', 1)[-1].strip().casefold() not in filters['country']:
+            continue
+        if filters.get('team') and value('category').casefold() not in filters['team']:
+            continue
+        if filters.get('location') and not any(term in [x.strip().casefold() for x in location.split(',')] for term in filters['location']):
+            continue
+        description = html_to_text(value('description'))
+        if filters.get('search') and not any(term in (value('title') + ' ' + description).casefold() for term in filters['search']):
+            continue
+        if ident in found:
+            places = found[ident]['location'].split('; ')
+            if location not in places:
+                found[ident]['location'] = '; '.join([*places, location])
+            continue
+        try:
+            posted = datetime.strptime(value('date'), '%m/%d/%Y').date().isoformat()
+        except ValueError:
+            posted = ''
+        found[ident] = _job(value('requisitionid') or ident, value('title'), location,
+                            'https://jobs.jobvite.com/nutanix/job/' + ident, posted, description, description)
+    return newest_first(list(found.values()))[:MAX_JOBS]
+
+
 def page_jobs(url: str, ask) -> list[dict]:
     """`ask(prompt, schema)` runs an agent and returns its JSON answer."""
+    if urlsplit(url).hostname == 'careers.nutanix.com' and urlsplit(url).path.rstrip('/') in ('/en/jobs', '/jobs'):
+        return nutanix_jobs(url)
     page, rendered = _page(url)
     if not rendered and not _embedded_greenhouse(page) and not _json_ld_jobs(page, url) and not _visible_job_links(page, url) and browser():
         # Nothing structured in the raw HTML: the listings are most likely
@@ -391,7 +480,9 @@ def page_jobs(url: str, ask) -> list[dict]:
             item['needs_detail'] = link
             jobs.append(item)
     if not jobs:
-        raise FetchError('No job listings could be read from this page. ' + (answer.get('note') or ''))
+        # The note is model output quoting untrusted page text: plain text only.
+        note = re.sub(r'[\x00-\x1f\x7f]', '', str(answer.get('note') or ''))[:200]
+        raise FetchError('No job listings could be read from this page. ' + note)
     return newest_first(jobs)[:MAX_JOBS]
 
 
@@ -419,6 +510,128 @@ def page_detail(item: dict) -> dict:
     if visible:
         result['posted'] = visible
     return result
+
+
+
+# ── Eightfold boards: public PCSX search/detail API ──────────────────────
+# Qualcomm's own careers host and every *.eightfold.ai board serve this API.
+
+def _pcsx_domain(host: str) -> str:
+    if host.endswith('.eightfold.ai'):
+        return host.split('.')[0] + '.com'
+    return re.sub(r'^(careers?|jobs|www)\.', '', host)
+
+
+def pcsx(url: str) -> list[dict]:
+    parts = urlsplit(url)
+    host = parts.hostname
+    domain = _pcsx_domain(host)
+    jobs, start = [], 0
+    while len(jobs) < MAX_JOBS:
+        try:
+            data = get_json(f'https://{host}/api/pcsx/search?domain={domain}&query=&location=India&start={start}').get('data') or {}
+            batch = data.get('positions') or []
+            if not batch and start == 0:
+                # A board with no India rows still matters to a reader pointed at it.
+                data = get_json(f'https://{host}/api/pcsx/search?domain={domain}&query=&start=0').get('data') or {}
+                batch = data.get('positions') or []
+        except FetchError:
+            if not jobs:
+                raise  # a board that cannot be read at all is a source failure
+            break  # later pages rate-limited: keep the pages already read
+        for j in batch:
+            item = _job(j.get('displayJobId') or j.get('id'), j.get('name'),
+                        '; '.join(j.get('locations') or []),
+                        urljoin(f'https://{host}/', j.get('positionUrl') or ''), _date(j.get('postedTs')))
+            item['needs_detail'] = (f'https://{host}/api/pcsx/position_details?position_id={j.get("id")}'
+                                    f'&domain={domain}&hl=en')
+            jobs.append(item)
+        start += len(batch)
+        total = int(data.get('count') or 0)
+        if not batch or (total and start >= total):
+            break
+    return jobs[:MAX_JOBS]
+
+
+def pcsx_detail(item: dict) -> dict:
+    data = get_json(item['needs_detail']).get('data') or {}
+    text = html_to_text(data.get('jobDescription') or '')
+    return {'requirements': text[:20000], 'description': text[:30000], 'posted': _date(data.get('postedTs'))}
+
+
+# ── Salesforce: the public static dump its own jobs page loads ───────────
+
+def salesforce(url: str) -> list[dict]:
+    out = []
+    for n in (1, 2):
+        try:
+            data = get_json(f'https://a.sfdcstatic.com/digital/xsf/careers/prod/jobs_{n}.json')
+        except FetchError:
+            if n == 1:
+                raise
+            continue  # a second segment may not exist yet
+        for j in data.get('Report_Entry') or []:
+            text = html_to_text(j.get('Job_Description') or '')
+            out.append(_job(j.get('Job_Requisition_Ref_ID'), j.get('Job_Posting_Title'),
+                            j.get('Job_Requisition_Primary_Location'), j.get('External_Job_Posting_Site') or '',
+                            _date(j.get('External_Job_Posting_Start_Date')), text, text))
+    return out
+
+
+# ── Keka career portals: the embed feed the portal page loads ────────────
+
+KEKA_FEED = re.compile(r'(?:/ats/documents/|embedjobs/(?:js|grouplinkstatus)/)([0-9a-f-]{36})')
+
+
+def keka(url: str) -> list[dict]:
+    parts = urlsplit(url)
+    host = parts.hostname
+    feed = next(iter(KEKA_FEED.findall(get_text(url))), '')
+    if not feed:
+        raise FetchError('Keka did not expose its job feed on this page; saved jobs were kept.')
+    rows = get_json(f'https://{host}/careers/api/embedjobs/default/active/{feed}')
+    if not isinstance(rows, list):
+        raise FetchError('Keka returned no readable job feed; saved jobs were kept.')
+    out = []
+    for j in rows:
+        text = html_to_text(j.get('description') or '')
+        place = re.search(r'\bLocation:\s*(.+?)(?=\s*(?:Experience|Education|Team|About|Role|Job)\b|\n|<|$)',
+                          (j.get('excerpt') or '') + '\n' + (j.get('description') or ''))
+        out.append(_job(j.get('jobNumber') or j.get('id'), j.get('title'),
+                        ' '.join(html_to_text(place.group(1)).split()) if place else '',
+                        f'https://{host}/careers/{j.get("id")}', _date(j.get('publishedOn')), text, text))
+    return out
+
+
+# ── Kula boards: server-rendered listing and job pages ───────────────────
+
+def _slug_title(slug: str) -> str:
+    return ' '.join(word.capitalize() for word in slug.split('-'))
+
+
+def kula(url: str) -> list[dict]:
+    parts = urlsplit(url)
+    token = next((s for s in parts.path.split('/') if s), '')
+    page = get_text(url)
+    found = {}
+    for href, ident, slug in re.findall(rf'href="([^"]*/{re.escape(token)}/(\d+)-([a-z0-9-]+)[^"]*)"',
+                                        page, re.I):
+        if ident not in found:
+            found[ident] = _job(ident, _slug_title(slug), '', urljoin(f'https://{parts.hostname}/',
+                                        html.unescape(href)), '')
+            found[ident]['needs_detail'] = found[ident]['url']
+    return newest_first(list(found.values()))[:MAX_JOBS]
+
+
+def kula_detail(item: dict) -> dict:
+    page = get_text(item['needs_detail'])
+    title = re.search(r'<title[^>]*>(.*?)[|–]', page, re.S | re.I)
+    text = html_to_text(page)
+    place = re.search(r'Workplace:\s*(?:On-Site|Hybrid|Remote)\s+(.+?)(?=\s*Job details\b|\n|·|$)', text)
+    return {'title': ' '.join(html_to_text(title.group(1)).split()) if title else '',
+            'location': ' '.join(place.group(1).split()) if place else '',
+            'requirements': text[:20000], 'description': text[:30000]}
+
 
 
 
@@ -525,5 +738,6 @@ def jibe(url: str) -> list[dict]:
 
 READERS = {'amazon': amazon, 'google': google, 'workday': workday,
            'greenhouse': greenhouse, 'lever': lever, 'ashby': ashby, 'smartrecruiters': smartrecruiters,
-           'oracle': oracle, 'jibe': jibe}
-DETAILS = {'workday': workday_detail, 'page': page_detail, 'smartrecruiters': smartrecruiters_detail, 'oracle': oracle_detail}
+           'oracle': oracle, 'jibe': jibe, 'pcsx': pcsx, 'salesforce': salesforce, 'keka': keka, 'kula': kula}
+DETAILS = {'workday': workday_detail, 'page': page_detail, 'smartrecruiters': smartrecruiters_detail,
+           'oracle': oracle_detail, 'pcsx': pcsx_detail, 'kula': kula_detail}

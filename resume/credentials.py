@@ -16,6 +16,8 @@ PROVIDERS = {
     'gemini': {'name': 'Gemini', 'default_model': 'gemini-3.8-flash', 'env': 'GEMINI_API_KEY'},
     'anthropic': {'name': 'Anthropic', 'default_model': 'claude-sonnet-5-5', 'env': 'ANTHROPIC_API_KEY'},
     'openrouter': {'name': 'OpenRouter', 'default_model': 'openai/gpt-5.4-mini', 'env': 'OPENROUTER_API_KEY'},
+    # The Z.AI GLM Coding Plan, through the same Anthropic-compatible endpoint ZCode uses.
+    'zai': {'name': 'Z.AI Coding Plan (GLM)', 'default_model': 'GLM-5.3-Flash', 'env': 'ZAI_API_KEY'},
 }
 
 MODEL_CHOICES = {
@@ -24,6 +26,7 @@ MODEL_CHOICES = {
     'anthropic': [('claude-sonnet-5-5', 'Claude Sonnet 5.5'), ('claude-haiku-5-5', 'Claude Haiku 5.5'), ('claude-opus-5-5', 'Claude Opus 5.5')],
     'openrouter': [('openai/gpt-5.4-mini', 'OpenAI GPT-5.4 Mini'), ('openai/gpt-5.5', 'OpenAI GPT-5.5'),
                    ('anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5'), ('openai/gpt-4o-mini', 'OpenAI GPT-4o Mini (legacy)')],
+    'zai': [('GLM-5.3-Flash', 'GLM-5.3 Flash'), ('GLM-5.3', 'GLM-5.3')],
 }
 
 

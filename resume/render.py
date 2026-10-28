@@ -7,6 +7,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from .storage import atomic_json
+
 # Typography presets, loosest first. The fitter walks down this list before it
 # will drop any content — losing a line of leading is always better than losing
 # an achievement.
@@ -42,7 +44,7 @@ def _typst_length(v):
 def compile_pdf(data: dict, out_pdf: Path, *, root: Path, template: Path,
                 data_path: Path) -> Path:
     data_path.parent.mkdir(parents=True, exist_ok=True)
-    data_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    atomic_json(data_path, data)  # the data file carries personal details: user-only
     rel = "/" + str(data_path.relative_to(root))
     cmd = [
         "typst", "compile",

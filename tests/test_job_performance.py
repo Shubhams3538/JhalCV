@@ -97,7 +97,7 @@ class PerformanceTests(unittest.TestCase):
             calls.append(prompt)
             if prompt=='slow':raise agents.AgentError('timed out')
             return {'answer':'ok'}
-        with patch('resume.jobs.agents.shutil.which',return_value='/bin/fake'),patch.dict(agents.RUNNERS,{'codex':run}):
+        with patch('resume.jobs.agents.shutil.which',return_value='/bin/fake'),patch('resume.jobs.agents.RETRY_BACKOFF',0),patch.dict(agents.RUNNERS,{'codex':run}):
             ai=agents.Agents(order=['codex'])
             with self.assertRaises(agents.AgentError):ai.ask('slow',{'type':'object'})
             self.assertEqual(ai.ask('good',{'type':'object','properties':{'answer':{'type':'string'}}}),{'answer':'ok'})

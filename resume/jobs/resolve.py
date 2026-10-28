@@ -30,6 +30,9 @@ PATTERNS = [
     ('ashby', r'jobs\.ashbyhq\.com/([A-Za-z0-9_.%-]+)'),
     ('smartrecruiters', r'api\.smartrecruiters\.com/v1/companies/([A-Za-z0-9_-]+)'),
     ('smartrecruiters', r'(?:careers|jobs)\.smartrecruiters\.com/([A-Za-z0-9_-]+)'),
+    ('kula', r'careers\.kula\.ai/([A-Za-z0-9_-]+)'),
+    ('keka', r'([a-z0-9-]+)\.keka\.com/careers'),
+    ('pcsx', r'([a-z0-9-]+)\.eightfold\.ai/careers'),
 ]
 _WORKDAY = re.compile(r'([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([A-Za-z0-9_-]+)')
 
@@ -38,7 +41,10 @@ def board_url(kind: str, token: str) -> str:
     return {'greenhouse': f'https://job-boards.greenhouse.io/{token}',
             'lever': f'https://jobs.lever.co/{token}',
             'ashby': f'https://jobs.ashbyhq.com/{token}',
-            'smartrecruiters': f'https://careers.smartrecruiters.com/{token}'}[kind]
+            'smartrecruiters': f'https://careers.smartrecruiters.com/{token}',
+            'kula': f'https://careers.kula.ai/{token}',
+            'keka': f'https://{token}.keka.com/careers/',
+            'pcsx': f'https://{token}.eightfold.ai/careers'}[kind]
 
 
 def found_in_page(page: str) -> list[str]:
@@ -79,7 +85,7 @@ RECENT_DAYS = 60
 
 def _board(kind: str, token: str) -> tuple[int, str, str]:
     """(job count, platform's own company name, newest posting date) for a board."""
-    from .sources import _date
+    from .sources import KEKA_FEED, _date
     try:
         if kind == 'greenhouse':
             meta = get_json(f'https://boards-api.greenhouse.io/v1/boards/{token}')
@@ -98,19 +104,41 @@ def _board(kind: str, token: str) -> tuple[int, str, str]:
             names = {str((j.get('company') or {}).get('name') or '') for j in jobs}
             return (int(data.get('totalFound') or 0), names.pop() if len(names) == 1 else '',
                     max((_date(j.get('releasedDate')) for j in jobs), default=''))
+        if kind == 'kula':
+            # Listing pages carry no posting dates; the link is page evidence.
+            page = get_text(f'https://careers.kula.ai/{token}?jobs=true')
+            found = set(re.findall(rf'href="[^"]*/{re.escape(token)}/(\d+)-[a-z0-9-]+', page))
+            return len(found), '', ''
+        if kind == 'keka':
+            feed = next(iter(KEKA_FEED.findall(get_text(f'https://{token}.keka.com/careers/'))), '')
+            rows = get_json(f'https://{token}.keka.com/careers/api/embedjobs/default/active/{feed}') if feed else []
+            return (len(rows) if isinstance(rows, list) else 0), '', max(
+                (_date(r.get('publishedOn')) for r in rows if isinstance(r, dict)), default='')
+        if kind == 'pcsx':
+            data = get_json(f'https://{token}.eightfold.ai/api/pcsx/search?domain={token}.com'
+                            f'&query=&location=India&start=0').get('data') or {}
+            return (int(data.get('count') or 0), '',
+                    max((_date(p.get('postedTs')) for p in data.get('positions') or []), default=''))
     except (FetchError, ValueError, TypeError, AttributeError):
         pass
     return 0, '', ''
+
+
+# Only guessed boards must prove they are alive; a link on the company's own
+# page is trusted even when its platform shows no posting dates.
+_DATELESS_KINDS = {'kula'}
 
 
 def _count(kind: str, token: str) -> tuple[int, str]:
     """(job count, board name) for a live board; (0, '') when absent or abandoned.
 
     Test and abandoned boards are common on these platforms (a single 2021
-    "test" posting, say), so a board needs a posting from the last 60 days.
+    "test" posting, say), so a guessed board needs a posting from the last
+    60 days. Kula listings show no dates, so kula is never guessed.
     """
     count, name, newest = _board(kind, token)
-    if not count or not newest or newest < (date.today() - timedelta(days=RECENT_DAYS)).isoformat():
+    if not count or (kind not in _DATELESS_KINDS
+                     and (not newest or newest < (date.today() - timedelta(days=RECENT_DAYS)).isoformat())):
         return 0, ''
     return count, name
 
@@ -222,7 +250,8 @@ def resolve(name: str, url: str, *, render: bool = True, guess: bool = True, cou
             if filtered:
                 return {'url': filtered[0], 'kind': kind, 'jobs': filtered[1], 'evidence': 'linked from the careers page'}
             continue
-        token = urlsplit(hit).path.strip('/').split('/')[0]
+        token = (urlsplit(hit).hostname.split('.')[0] if kind in ('keka', 'pcsx')
+                 else urlsplit(hit).path.strip('/').split('/')[0])
         count, _ = _count(kind, token)
         if count:
             return {'url': hit, 'kind': kind, 'jobs': count, 'evidence': 'linked from the careers page'}
