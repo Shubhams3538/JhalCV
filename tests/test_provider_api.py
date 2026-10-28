@@ -88,8 +88,9 @@ class ProviderTests(unittest.TestCase):
                 self.assertNotIn(KEY1, file.read_text())
                 self.assertNotIn(KEY2, file.read_text())
 
+    @patch('resume.llm.cli_routes', return_value=[])
     @patch('resume.provider_api.call')
-    def test_secret_reflected_in_success_response_is_discarded(self, call):
+    def test_secret_reflected_in_success_response_is_discarded(self, call, cli):
         schema = {'type': 'object', 'properties': {'text': {'type': 'string'}}}
         call.return_value = {'text': KEY1}
         with tempfile.TemporaryDirectory() as directory, llm.credential_scope([route()], directory):

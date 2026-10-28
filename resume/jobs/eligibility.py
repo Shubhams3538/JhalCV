@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 from .metrics import timed, submit
 from .fetch import FetchError, fetch_budget
@@ -145,11 +144,14 @@ def screen_titles(items: list[dict], years: float, agents) -> dict:
 
 
 def check(jobs: list[dict], years: float, agents) -> dict:
-    """Check independent batches concurrently; a slow model keeps a job uncertain."""
+    """Review batches concurrently, with each AI attempt bounded by its own timeout."""
     batches = [jobs[i:i+BATCH] for i in range(0, len(jobs), BATCH)]
     @timed('eligibility')
     def run(batch):
-        with fetch_budget(time.monotonic() + 45):
+        # Reviewing saved text is independent of a career site's fetch budget.
+        # Agents bounds every CLI attempt and its retries. An outer deadline
+        # would kill a valid slow answer and bypass provider fallback entirely.
+        with fetch_budget(None):
             return _check_batch(batch, years, agents)
     if len(batches) == 1:
         return run(batches[0])
