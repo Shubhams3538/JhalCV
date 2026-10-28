@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -71,9 +72,36 @@ def request_shape(route, prompt, schema, system, temperature, schema_name):
                 'output_config': {'format': {'type': 'json_schema', 'schema': schema}}}
         if system:
             body['system'] = system
+    elif provider == 'zai':
+        # Anthropic-compatible Coding Plan endpoint. Structured-output support is not
+        # documented there, so the schema is stated in the system prompt and the
+        # answer is validated against it like every other provider's.
+        url = 'https://api.z.ai/api/anthropic/v1/messages'
+        headers.update({'x-api-key': route['key'], 'Authorization': 'Bearer ' + route['key'],
+                        'anthropic-version': '2023-06-01'})
+        rule = ('Respond with exactly one JSON object and nothing else: no prose, no Markdown fences. '
+                'It must match this JSON Schema: ' + json.dumps(schema, separators=(',', ':')))
+        body = {'model': model, 'max_tokens': 8192, 'temperature': temperature,
+                'system': (system + '\n\n' + rule) if system else rule,
+                'messages': [{'role': 'user', 'content': prompt}]}
     else:
         raise LLMError('Unsupported AI provider.')
     return url, headers, body
+
+
+def json_from_text(content: str):
+    """The JSON object in a model's text answer, tolerating Markdown fences or a preamble."""
+    text = content.strip()
+    fenced = re.match(r'^```(?:json)?\s*(.*?)\s*```$', text, re.S)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        return json.loads(text)
+    except ValueError:
+        start, end = text.find('{'), text.rfind('}')
+        if start < 0 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
 
 
 def send(url, headers, body, timeout):
@@ -131,10 +159,10 @@ def call(route, prompt, schema, system, temperature, schema_name, timeout):
                 raise LLMError('Provider refused or truncated this response.')
             content = ''.join(p['text'] for p in candidate['content']['parts'] if 'text' in p and not p.get('thought'))
         else:
-            if response.get('stop_reason') not in (None, 'end_turn'):
+            if response.get('stop_reason') not in (None, 'end_turn', 'stop'):
                 raise LLMError('Provider refused or truncated this response.')
             content = ''.join(p['text'] for p in response['content'] if p.get('type') == 'text')
-        result = json.loads(content)
+        result = json_from_text(content) if route['provider'] == 'zai' else json.loads(content)
         validate_output(result, strictify(schema))
         return result
     except (KeyError, IndexError, TypeError, ValueError):

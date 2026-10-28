@@ -188,7 +188,7 @@ def record_api(provider, model, response):
         if isinstance(details, dict):
             read = details.get('cached_tokens', 0)
             write = details.get('cache_write_tokens', 0)
-    elif provider == 'anthropic':
+    elif provider in ('anthropic', 'zai'):  # Z.AI's Coding Plan endpoint reports Anthropic-style usage
         inp, out = count(u.get('input_tokens')), count(u.get('output_tokens'))
         read, write = count(u.get('cache_read_input_tokens')) or 0, count(u.get('cache_creation_input_tokens')) or 0
         if inp is not None:
@@ -206,6 +206,7 @@ def record_api(provider, model, response):
     # Only accept model-like metadata; never persist arbitrary response content.
     actual = actual if isinstance(actual, str) and model_key(actual) in RATES else model
     store.record(provider, actual, inp, out, read, write, purpose=purpose, write_1h=hour,
+                 channel='subscription' if provider == 'zai' else 'api',  # Coding Plan quota, not pay-per-token
                  reported=u.get('cost') if provider == 'openrouter' else None, basis='reported')
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from .metrics import timed, submit
 from .fetch import FetchError, fetch_budget
 from datetime import date
 
@@ -142,6 +143,7 @@ def screen_titles(items: list[dict], years: float, agents) -> dict:
 def check(jobs: list[dict], years: float, agents) -> dict:
     """Check independent batches concurrently; a slow model keeps a job uncertain."""
     batches = [jobs[i:i+BATCH] for i in range(0, len(jobs), BATCH)]
+    @timed('eligibility')
     def run(batch):
         with fetch_budget(time.monotonic() + 45):
             return _check_batch(batch, years, agents)
@@ -149,8 +151,9 @@ def check(jobs: list[dict], years: float, agents) -> dict:
         return run(batches[0])
     out = {}
     with ThreadPoolExecutor(max_workers=3) as pool:
-        for verdicts in pool.map(run, batches):
-            out.update(verdicts)
+        futures = [submit(pool, run, batch) for batch in batches]
+        for future in futures:
+            out.update(future.result())
     return out
 
 

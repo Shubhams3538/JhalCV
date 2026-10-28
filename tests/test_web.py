@@ -99,6 +99,17 @@ class WebTests(unittest.TestCase):
                 self.request('/api/jobs/review', body, headers)
         self.assertEqual(error.exception.code, 400)
 
+    def test_benchmark_report_endpoint_and_invalid_run(self):
+        self.assertIsNone(self.request('/api/benchmarks')['report'])
+        with self.app.jobs.benchmarks.run('review'):
+            pass
+        report = self.request('/api/benchmarks')['report']
+        self.assertEqual(report['mode'], 'review')
+        self.assertEqual(self.request('/api/benchmarks?run='+report['id'])['report']['id'], report['id'])
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/benchmarks?run=../credentials')
+        self.assertEqual(error.exception.code, 400)
+
     def test_jobs_endpoints(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
         state = self.request('/api/jobs/sources/add', {'name': 'Acme', 'url': 'https://job-boards.greenhouse.io/acme'}, headers)
@@ -115,6 +126,18 @@ class WebTests(unittest.TestCase):
         self.assertEqual(state['jobs'][0]['status'], 'applied')
         with self.assertRaises(urllib.error.HTTPError):
             self.request('/api/jobs/status', {'id': ident, 'status': 'deleted'}, headers)
+
+    def test_manual_job_eligibility_endpoint(self):
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        source = self.app.jobs.store.add_source('Manual', 'https://jobs.lever.co/manual', 'lever')
+        ident = self.app.jobs.store.save_listing(source['id'], [dict(external_id='1', title='Engineer', posted='', location='India', url='https://example.com/jobs/1', requirements='', description='')])[0]
+        result = self.request('/api/jobs/eligibility', {'id': ident, 'eligible': 'no'}, headers)
+        self.assertEqual(result['jobs'][0]['category'], 'no')
+        result = self.request('/api/jobs/eligibility', {'id': ident, 'eligible': None}, headers)
+        self.assertEqual(result['jobs'][0]['category'], 'review')
+        for body in ({'id': ident}, {'id': ident, 'eligible': 'yes'}, {'id': ident + 1, 'eligible': 'no'}):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/jobs/eligibility', body, headers)
 
     def test_company_csv_preview_and_import_endpoints(self):
         headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}

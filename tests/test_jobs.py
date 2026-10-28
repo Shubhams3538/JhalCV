@@ -61,6 +61,39 @@ class DetectAndFetchTests(unittest.TestCase):
 
 
 class ReaderTests(unittest.TestCase):
+    @patch('resume.jobs.sources.get_text')
+    def test_nutanix_public_feed_preserves_filters_and_excludes_unlisted_jobs(self, fetch):
+        board = '<a href="/nutanix/job/b">B</a><a href="/nutanix/job/c">C</a><a href="/nutanix/search?c=Engineering&amp;p=0">More</a>'
+        feed = '<result>' + ''.join(
+            f'<job><id>{ident}</id><requisitionid>{ident}1</requisitionid><title>Engineer</title>'
+            f'<category>{team}</category><location>{place}</location><date>{posted}</date>'
+            '<description>&lt;p&gt;Build APIs. 5 years experience.&lt;/p&gt;</description></job>'
+            for ident, team, place, posted in [('a','Engineering','Pune, India','10/25/2026'),
+                ('a','Engineering','Bangalore, India','10/25/2026'),
+                ('b','Engineering','Singapore, Singapore','10/25/2026'),
+                ('c','Sales','Pune, India','10/25/2026'),
+                ('private','Engineering','Pune, India','10/25/2026')]) + '</result>'
+        fetch.side_effect = [board, '<a href="/nutanix/job/a">A</a><a href="/nutanix/search/?p=1&amp;c=Engineering">Next</a>', '<a href="/nutanix/job/a">A</a>', feed]
+        ask = lambda *_: self.fail('No AI or challenged careers request needed')
+        jobs = sources.page_jobs('https://careers.nutanix.com/en/jobs/?country=India&team=Engineering&team=Information+Technology&pagesize=20', ask)
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['external_id'], 'a1')
+        self.assertEqual(jobs[0]['posted'], '2026-10-25')
+        self.assertEqual(jobs[0]['location'], 'Pune, India; Bangalore, India')
+        self.assertIn('5 years', jobs[0]['requirements'])
+        self.assertEqual(jobs[0]['url'], 'https://jobs.jobvite.com/nutanix/job/a')
+        with self.assertRaises(FetchError):
+            sources.nutanix_jobs('https://careers.nutanix.com/en/jobs/?subteam=Software')
+
+    @patch('resume.jobs.sources.get_text')
+    def test_nutanix_fails_closed_on_broken_public_board_or_feed(self, fetch):
+        fetch.return_value = '<title>Access denied</title>'
+        with self.assertRaises(FetchError):
+            sources.nutanix_jobs('https://careers.nutanix.com/en/jobs/')
+        fetch.side_effect = ['<a href="/nutanix/job/a">A</a>', '<html>Not XML']
+        with self.assertRaises(FetchError):
+            sources.nutanix_jobs('https://careers.nutanix.com/en/jobs/')
+
     @patch('resume.jobs.sources.get_json')
     def test_lever_preserves_explicit_country_for_city_only_locations(self, fetch):
         fetch.return_value = [{'id': 'in', 'text': 'Engineer', 'categories': {'location': 'Bengaluru'}, 'country': 'IN'},
@@ -671,11 +704,47 @@ class SimplifiedJobCategoriesTests(unittest.TestCase):
         self.assertEqual(category(dict(base, eligible='no')), 'no')
         self.assertEqual(category(dict(base, relevant='no')), 'no')
         self.assertEqual(category(dict(base, eligible='unclear')), 'review')
-        self.assertEqual(category(dict(base, posted='')), 'review')
+        # Undated jobs that pass both checks are Eligible (the list marks the date unverified);
+        # undated jobs not yet fully checked still wait in review.
+        self.assertEqual(category(dict(base, posted='')), 'eligible')
+        self.assertEqual(category(dict(base, posted='', relevant=None)), 'review')
+        self.assertEqual(category(dict(base, posted='', eligible='no')), 'no')
         self.assertEqual(category(dict(base, posted=(date.today()-timedelta(days=7)).isoformat())), 'eligible')
         old = dict(base, posted=(date.today()-timedelta(days=8)).isoformat())
         self.assertEqual(category(old), 'old')
         self.assertEqual(category(dict(old, status='applied')), 'applied')
+
+    def test_manual_rejection_survives_refresh_detail_and_ai_and_can_be_undone(self):
+        ident = self.store.save_listing(self.src['id'], [job('manual')])[0]
+        verdict = dict(min_years=0, eligible='yes', relevant='yes', reason='AI result', by='rules')
+        self.store.set_eligibility({ident: verdict})
+        self.store.set_manual_eligibility(ident, 'no')
+        self.assertEqual(self.store.jobs()[0]['category'], 'no')
+        self.store.reset_eligibility()
+        self.assertEqual(self.store.unchecked(None), [])
+        self.assertEqual(self.store.detail_candidates(self.src['id']), [])
+        self.store.save_listing(self.src['id'], [job('manual', reqs='Changed requirements')])
+        self.store.set_detail(ident, {'requirements': 'Another update'})
+        self.store.set_eligibility({ident: verdict})
+        reopened = JobStore(self.store.path.parent.parent)
+        self.assertEqual(reopened.jobs()[0]['manual_eligible'], 'no')
+        self.assertEqual(reopened.jobs()[0]['category'], 'no')
+        self.store.set_status(ident, 'applied')
+        self.assertEqual(self.store.jobs()[0]['category'], 'applied')
+        self.store.set_status(ident, 'seen')
+        self.store.set_manual_eligibility(ident, None)
+        self.assertEqual(self.store.jobs()[0]['category'], 'eligible')
+        with self.assertRaises(ValueError):
+            self.store.set_manual_eligibility(ident, 'yes')
+        self.store.delete_job(ident)
+        with self.assertRaises(ValueError):
+            self.store.set_manual_eligibility(ident, 'no')
+
+    def test_manual_rejection_of_undated_job_and_old_policy(self):
+        from resume.jobs.freshness import category
+        base = dict(status='new', posted='', manual_eligible='no')
+        self.assertEqual(category(base), 'no')
+        self.assertEqual(category(dict(base, posted=(date.today()-timedelta(days=8)).isoformat())), 'old')
 
     def test_cleanup_boundary_protects_applied_unknown_and_prevents_recollection(self):
         today=date.today()

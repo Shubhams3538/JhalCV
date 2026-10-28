@@ -16,6 +16,7 @@ from .store import JobStore, location_matches
 from .freshness import freshness, newest_first
 from .imports import MAX_ROWS, preview_csv, validate_entry
 from .resolve import resolve
+from .metrics import Benchmarks, measure, timed, company_scope, submit, mark
 
 TITLE_SCREEN_MIN = 16
 MAX_DETAILS = 40     # detail pages fetched per source per run (new jobs only)
@@ -23,8 +24,11 @@ SOURCE_WORKERS = 8
 DETAIL_WORKERS = 12
 SOURCE_SECONDS = 150
 
-MAX_CHECKS = 120     # experience checks per run
+# Every new job is checked in the refresh that finds it. The title screen, text
+# rules and the answer cache keep this cheap, so no per-run cap is needed.
+MAX_CHECKS = 100_000
 RESOLVE_EVERY = 14 * 86400  # how often a careers page is re-examined for a direct feed
+RESOLVE_RETRY = 86400       # a page source that keeps failing is re-examined sooner
 
 
 def _keywords(value) -> list[str]:
@@ -41,6 +45,7 @@ class JobService:
     def __init__(self, root):
         self.root = Path(root)
         self.store = JobStore(root)
+        self.benchmarks = Benchmarks(root)
         from ..usage import UsageStore
         self.usage = UsageStore(root)
         self.lock_path = self.root / '.local' / 'jobs.lock'
@@ -131,7 +136,7 @@ class JobService:
         relevance checks then cover only the refreshed sources' jobs, so a
         partial refresh never spends agent usage on other companies."""
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
         try:
             try:
                 if os.name == 'nt':
@@ -142,77 +147,84 @@ class JobService:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise RuntimeError('Another job refresh is already running.') from None
-            self.store.prune_old()
-            agents = Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
-            if recheck_only:
-                return self._review_saved(profile, agents, say, source_ids)
-            found = new = 0
-            failures = []
-            chosen = [s for s in self.store.sources() if source_ids is None or s['id'] in source_ids]
-            if not recheck_only:
-                active = {}
-                completed = checked = 0
-                years = self.experience_years(profile)['years']
-                self.progress.update(phase='fetch', total=len(chosen), completed=0, active=[], started_at=int(time.time()))
-                # Direct feeds finish first; slow rendered pages cannot hold up the entire queue.
-                chosen.sort(key=lambda src: src['kind'] == 'page')
-                with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
-                        ThreadPoolExecutor(max_workers=SOURCE_WORKERS) as pool:
-                    futures = {}
-                    def read_source(src):
-                        with self._guard:
-                            active[src['id']] = src['name']
-                            self.progress['active'] = list(active.values())
-                        try:
-                            return self._refresh_source(src, agents, detail_pool, say, years)
-                        finally:
-                            with self._guard:
-                                active.pop(src['id'], None)
-                                self.progress['active'] = list(active.values())
-                                self.progress['completed'] += 1
-                    for src in chosen:
-                        futures[pool.submit(read_source, src)] = src
-                    for future in as_completed(futures):
-                        try:
-                            count, added, failure = future.result()
-                        except Exception as e:  # one company must never abort the others
-                            src = futures[future]
-                            self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
-                            count, added, failure = 0, 0, src['name']
-                        found += count
-                        new += added
-                        if failure:
-                            failures.append(failure)
-                        completed = self.progress['completed']
-                        say(f'{completed}/{len(chosen)} companies completed')
-                        # Publish verdicts as feeds finish, while other companies continue fetching.
-                        if checked < MAX_CHECKS:
-                            todo = [j for j in self.store.unchecked(MAX_CHECKS-checked, {futures[future]['id']})
-                                    if j.get('posted') == date.today().isoformat()]
-                            if todo:
-                                say(f'{completed}/{len(chosen)} companies completed; checking {len(todo)} jobs…')
-                                self.store.set_eligibility(eligibility.check(todo, years, agents))
-                                checked += len(todo)
-
-            self.store.prune_old()
-            years = self.experience_years(profile)['years']
-            checked = 0 if recheck_only else checked
-            todo = self.store.unchecked(MAX_CHECKS-checked, None if source_ids is None else {s['id'] for s in chosen})
-            if todo:
-                say(f'Checking relevance and experience for {len(todo)} job(s)…')
-                self.store.set_eligibility(eligibility.check(todo, years, agents))
-            self.store.set_meta('last_refresh', int(time.time()))
-            scope = '' if source_ids is None else ', '.join(s['name'] for s in chosen) + ': '
-            parts = [] if recheck_only else [f'{scope}{found} matching job(s), {new} new']
-            checked += len(todo)
-            if checked:
-                parts.append(f'{checked} checked by ' + (', '.join(NAMES[a] for a in agents.used) or 'text rules'))
-            if failures:
-                parts.append('could not read: ' + ', '.join(failures))
-            text = '. '.join(parts)
-            return text[:1].upper() + text[1:] + '.' if parts else 'Nothing to check.'
+            with self.benchmarks.run('review' if recheck_only else 'refresh'):
+                return self._refresh_locked(profile, say, recheck_only, source_ids)
         finally:
             os.close(fd)
+
+    def _refresh_locked(self, profile, say, recheck_only, source_ids):
+        self.store.prune_old()
+        agents = Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
+        if recheck_only:
+            return self._review_saved(profile, agents, say, source_ids)
+        found = new = 0
+        failures = []
+        chosen = [s for s in self.store.sources() if source_ids is None or s['id'] in source_ids]
+        if not recheck_only:
+            active = {}
+            completed = checked = 0
+            years = self.experience_years(profile)['years']
+            self.progress.update(phase='fetch', total=len(chosen), completed=0, active=[], started_at=int(time.time()))
+            # Direct feeds finish first; slow rendered pages cannot hold up the entire queue.
+            chosen.sort(key=lambda src: src['kind'] == 'page')
+            with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
+                    ThreadPoolExecutor(max_workers=SOURCE_WORKERS) as pool:
+                futures = {}
+                def read_source(src, queued_at):
+                    with self._guard:
+                        active[src['id']] = src['name']
+                        self.progress['active'] = list(active.values())
+                    try:
+                        with company_scope(src['id'], src['name']):
+                            mark('source_queue', time.perf_counter()-queued_at)
+                            with measure('source'):
+                                return self._refresh_source(src, agents, detail_pool, say, years)
+                    finally:
+                        with self._guard:
+                            active.pop(src['id'], None)
+                            self.progress['active'] = list(active.values())
+                            self.progress['completed'] += 1
+                for src in chosen:
+                    futures[submit(pool, read_source, src, time.perf_counter())] = src
+                for future in as_completed(futures):
+                    try:
+                        count, added, failure = future.result()
+                    except Exception as e:  # one company must never abort the others
+                        src = futures[future]
+                        self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
+                        count, added, failure = 0, 0, src['name']
+                    found += count
+                    new += added
+                    if failure:
+                        failures.append(failure)
+                    completed = self.progress['completed']
+                    say(f'{completed}/{len(chosen)} companies completed')
+                    # Publish verdicts as feeds finish, while other companies continue fetching.
+                    if checked < MAX_CHECKS:
+                        todo = [j for j in self.store.unchecked(MAX_CHECKS-checked, {futures[future]['id']})
+                                if j.get('posted') == date.today().isoformat()]
+                        if todo:
+                            say(f'{completed}/{len(chosen)} companies completed; checking {len(todo)} jobs…')
+                            self.store.set_eligibility(eligibility.check(todo, years, agents))
+                            checked += len(todo)
+
+        self.store.prune_old()
+        years = self.experience_years(profile)['years']
+        checked = 0 if recheck_only else checked
+        todo = self.store.unchecked(MAX_CHECKS-checked, None if source_ids is None else {s['id'] for s in chosen})
+        if todo:
+            say(f'Checking relevance and experience for {len(todo)} job(s)…')
+            self.store.set_eligibility(eligibility.check(todo, years, agents))
+        self.store.set_meta('last_refresh', int(time.time()))
+        scope = '' if source_ids is None else ', '.join(s['name'] for s in chosen) + ': '
+        parts = [] if recheck_only else [f'{scope}{found} matching job(s), {new} new']
+        checked += len(todo)
+        if checked:
+            parts.append(f'{checked} checked by ' + (', '.join(NAMES[a] for a in agents.used) or 'text rules'))
+        if failures:
+            parts.append('could not read: ' + ', '.join(failures))
+        text = '. '.join(parts)
+        return text[:1].upper() + text[1:] + '.' if parts else 'Nothing to check.'
 
     def _review_saved(self, profile, agents, say, source_ids=None):
         # Snapshot the queue once: uncertain answers must never create an
@@ -234,9 +246,15 @@ class JobService:
         by = ', '.join(NAMES[a] for a in agents.used) or 'text rules'
         return f'Reviewed {total} saved job(s) using {by}. Uncertain matches or dates remain in Needs review.'
 
+    @timed('discovery')
     def _upgrade_page_source(self, src):
-        """Look for the hiring platform behind a careers page, at most every two weeks."""
-        if src['kind'] != 'page' or time.time() - (src.get('resolved_at') or 0) < RESOLVE_EVERY:
+        """Look for the hiring platform behind a careers page, at most every two weeks.
+
+        A source whose last run failed retries discovery daily: a transport
+        fix or a platform link appearing on the page can make the direct feed
+        reachable long before the two-week mark."""
+        interval = RESOLVE_RETRY if src.get('last_error') else RESOLVE_EVERY
+        if src['kind'] != 'page' or time.time() - (src.get('resolved_at') or 0) < interval:
             return src
         # A role/team filter encoded in the supplied URL must not be silently
         # lost when switching from the search page to a whole-board feed.
@@ -264,13 +282,17 @@ class JobService:
         with fetch_budget(deadline):
             try:
                 src = self._upgrade_page_source(src)
-                if src['kind'] == 'page':
-                    items = sources.page_jobs(src['url'], agents.ask)
-                else:
-                    items = sources.READERS[src['kind']](src['url'])
+                with measure('listing'):
+                    if src['kind'] == 'page':
+                        items = sources.page_jobs(src['url'], agents.ask)
+                    else:
+                        items = sources.READERS[src['kind']](src['url'])
                 items = newest_first([dict(j) for j in items if freshness(j.get('posted')) != 'expired'
                                       and title_matches(j['title'], src['include'], src['exclude'])
-                                      and location_matches(j.get('location') or '', src['locations'])])[:sources.MAX_JOBS]
+                                      # A listing without a location (Kula, some page
+                                      # readers) is kept: its detail page supplies one,
+                                      # and views still hide jobs that never get one.
+                                      and (not j.get('location') or location_matches(j['location'], src['locations']))])[:sources.MAX_JOBS]
                 detail = sources.DETAILS.get(src['kind'])
                 known = self.store.known_ids(src['id'])
                 # Screening is worthwhile only when a large detail-only listing
@@ -313,6 +335,7 @@ class JobService:
                 found, new = len(items), len(fresh)
             except (FetchError, AgentError, KeyError, ValueError, TypeError, IndexError) as e:
                 failure = src['name']
+                mark('source_failure')
                 self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
             if src['kind'] == 'page':
                 pending = [r for r in self.store.detail_candidates(src['id'])
@@ -326,11 +349,12 @@ class JobService:
 
     @staticmethod
     def _details(items, detail, pool, deadline):
-        def read(item):
-            with fetch_budget(deadline):
+        def read(item, queued_at):
+            mark('detail_queue', time.perf_counter()-queued_at)
+            with fetch_budget(deadline), measure('details'):
                 remaining()
                 return detail(item)
-        futures = {pool.submit(read, item): item for item in items}
+        futures = {submit(pool, read, item, time.perf_counter()): item for item in items}
         for future in as_completed(futures):
             try:
                 yield futures[future], future.result()

@@ -97,3 +97,67 @@ Saved-review final browser check: live button shows Review unreviewed jobs(240);
 ## Commit checkpoint (October 26)
 
 All current work recorded on `perf/job-refresh`: optimization, portal readers and persistence fixes in `418c549` dated October 27, 2026 20:00 IST; saved-only review workflow follows as the October 28 commit. Full suite:184 tests; independent first-commit snapshot:180 tests. Both author and committer dates are set explicitly. No push performed.
+
+## Live timing and tailoring context (October26)
+
+- New metadata-only `resume/jobs/metrics.py`: thread-safe inclusive span aggregates, per-company labels, context propagation into source/detail/eligibility executors, failure/cache/queue counts; atomic completed JSON reports in `.local/job-benchmarks/`. New GET `/api/benchmarks` (optionalrun=id) exposes latestactive/completed and10recent summaries, including terminal-generatedreports. Failures to persist never fail paid work.
+- Benchmarks sidebar route displays wall-clock duration separately from inclusive overlapping stage totals; collectionAI is explicitly labelled to avoid suggesting eligibilityAI is attributed percompany. DownloadJSON contains metadataonly; user should now run Refresh all to produce a full-refresh measurement. No synthetic data was inserted into the user's reports.
+- Same-tab Tailor resume pins originating title/link and Back to this job; restores tab/search/drawer/sourceScroll/globalScroll, focuses/highlights exactjob, followschangedcategories and explainsdeletedjobs. sessionStorage stores onlyjob/UIcontext, notJD/profile. Generationguard prevents staleJobsreturns from changing URL/scroll after furthernavigation.
+-192tests passed, covering parallelcontext, persistence, failedspans/queue waits, newerexternalrun selection, HTTP/AIinstrumentation, metadata privacy, reportendpoints and existingflows. Isolatedfixture browser verifiedreportstage/companytables, savedJDload/pinnedtitle, Needsreview/searchrestoration/highlight/focus, and delayedreturncancelledbySettingsnavigation.
+- Freshreview found2issues, bothfixed: failedqueueacquire now raises inside measuredspan; staleBack-to-jobresponses guardedbyviewrevision. BrowsercompanyAIlabelclarifiedasCollectionAI. Finalreview verification pending.
+
+Final verification:192tests passed, JSsyntax/Pythoncompilation/diffchecks passed; freshreview verified bothfixes and foundnoremainingconcreteissues. Production app reloaded onlywhilejoblockidle;381savedjobs/147sources retained. Benchmarks UI verified stage/companytables anddownload availability; a live single-company Nutanix report was present(3.05s, failedcollection), so it must not be mistaken for a full-refresh benchmark. User still needs Refresh all for full-run analysis. Isolated8766QAfixture used onlysyntheticdata, noAPIcharges oruserprofilewrites; fixture serverstopped afterverification.
+
+
+## Manual rejection and Nutanix (October26)
+
+- SQLite additive manual_eligible column plus authenticated jobs/eligibility action. Manual no is durable across refresh/detail/AI resets/results and excluded from review/detail queues; undo returns to retained AI decision. Applied/date precedence unchanged.
+- Job actions now Tailor resume + More (manual rejection/undo, Applied toggle, Delete); AI explanations collapsed, open details preserved during rendering.
+- Nutanix custom filtered careers URLs use the verified public Jobvite board plus employer XML feed. Follow category Show More and numbered search pagination, intersect public IDs before applying country/team/location/search filters. Unknown filters fail closed. Feed dates retained without inventing corrections; they may differ a day from frontend dates.
+- Live reader returned all15 matching India Engineering/IT jobs. Fresh independent review found no concrete issues;197tests passed before final documentation/UI verification. No commit or push requested.
+
+## Career-portal error fixes (October 26, 2026)
+
+Diagnosed all 52 sources recording errors (147 total). Three root causes and fixes, all verified live:
+
+- Transport: many career sites drop urllib's TLS handshake (SSL handshake timeouts) or answer 403/406 to its fingerprint. `_open` now retries once through curl (`--http2`, browser headers, same redirect/size guards). Fixes plain fetch for ACKO, AMD, Atlassian, Cisco, Confluent-class 429s are separate, MoEngage, Morgan Stanley, Media.net, Qure.ai, Qualcomm pages, and unblocks `resolve`/`jibe_from_page` (Docusign auto-upgrades next refresh).
+- Headless render: Chrome headless advertised "HeadlessChrome" and Cloudflare/Uber/SAP/Akamai bot filters rejected it before job HTML loaded. `render_page` now sends the real Chrome UA, disables AutomationControlled, bounds page load with `--timeout=30000`, virtual time 9s, hard budget 45s. Verified: SAP, Uber, Ather, Goldman, Meta render with job links.
+- New direct readers (no browser, no AI for listings): Eightfold PCSX (`pcsx`, Qualcomm + morganstanley.eightfold.ai; search 10/page, rate-limited later pages keep earlier ones), Salesforce static dump (`salesforce`, a.sfdcstatic.com jobs_1/2.json), Keka embed feed (`keka`, hash scraped from portal page; Nurix, Skit.ai), Kula SSR boards (`kula`, slug titles + detail pages recover real title/location; ACKO, Rocketlane, Cashfree). Detect/labels/READERS/DETAILS extended; `resolve` learns kula/keka/eightfold patterns (kula is dateless: never guessed, page evidence only); failing page sources retry discovery daily (`RESOLVE_RETRY`) instead of every 14 days.
+- Listing items with an empty location (Kula, some AI pages) are no longer dropped before their detail page can supply one; views still hide jobs that never get a location.
+
+DB repairs (backup `.cache/jobs-before-portal-fixes-20261026-021614.sqlite3`, upgrades via `upgrade_source`, jobs retained): LinkedIn→lever, Media.net→smartrecruiters, Morgan Stanley→pcsx, Qualcomm→pcsx, Salesforce→salesforce, Nurix→keka, Skit.ai→keka (skit.keka.com), Docusign→jibe, ACKO/Cashfree/Rocketlane→kula. Targeted refresh with AI stubbed (no usage spend, verdicts untouched): 11 sources 96 jobs, then Kula re-run 90 jobs with real titles/locations. AMD jibe reader works unupgraded via curl. Nutanix reader verified (50 jobs via Jobvite).
+
+Still blocked, manual entry or later work: Cisco + Lowe's (Phenom `/widgets` needs an undocumented CSRF-gated POST schema; render never shows cards), Walmart (custom Next.js app, search results not server-rendered; only /api/init seen), Flipkart (TurboHire thapi.azurewebsites.net endpoints found but jobs call not identified), Hasura (Gem public GraphQL batch, query body unknown), Akamai (bot wall on www + jobs hosts, headless blocked), Quantbox (site TLS certificate expired — their bug), Confluent (Cloudflare 429 rate limit; retry later). LinkedIn lever board has no India roles (0 matching is correct). Nurix/Skit boards currently have no fresh (<8-day) postings; 0 matching is correct.
+
+215 tests pass (13 new in tests/test_job_portals.py). No commit or push performed.
+
+Note: before these repairs started (first backup at 02:16), the jobs table was found emptied (0 rows, sources' last_run/last_error cleared) — not caused by this work; likely an earlier test run. Older snapshot with 2 applied + 380 new jobs: `.cache/jobs-before-verified-link-repairs.sqlite3`. A full refresh repopulates listings; applied flags are not recovered automatically.
+
+## GLM bridge from ZCode's login (October26)
+
+- `resume/zcode.py`: when no Z.AI key is saved, job agents fall back to ZCode's own login. ZCode stores its Z.AI OAuth access token AES-256-GCM encrypted in `~/.zcode/v2/credentials.json`; a Node helper decrypts only that field into process memory (10-minute in-process cache), and it authenticates against the existing Coding Plan endpoint (verified: a wrong token gets HTTP 401, the real token only HTTP 429 while the plan was throttled). The token never reaches disk, logs, the usage database, or the browser.
+- Consent is a kill switch: `.local/zcode_glm.json` with `{"enabled": true}`. Started as a one-day grant; the user made it standing the same night. Deleting the file or setting `false` turns the bridge off; the old date format is rejected.
+- `tests/test_glm.py` gained consent-switch, helper-failure/caching, saved-key-precedence, and agent-run coverage. Suite: 225 tests pass.
+- Overnight, `.cache/overnight_glm_benchmark.sh` waits for the 03:30 reset, verifies GLM through the bridge, then runs `python3 -m resume.jobs refresh` for the full-refresh benchmark. Log: `.cache/overnight_glm_benchmark.log`.
+
+## AI retries, needs-review requeue, activity popup (October 26, 2026)
+
+- `agents.py`: each model now gets `AGENT_ATTEMPTS=3` tries (2s/4s backoff) before the chain moves on; HTTP 429/rate-limit reclassified from run-disabling to retryable (usage-limit/quota/auth still disable a provider for the run). `CHAIN_GIVEUP=2`: after the whole chain fails twice in a row, later asks raise immediately so text rules take over without stalling the run.
+- Requeued only the 396 needs-review jobs (UPDATE ... WHERE eligible='unclear'; 370 not-eligible + 86 eligible rule verdicts kept). Review run completed: 348 Codex verdicts, 48 rule fallbacks. GLM bridge currently throttled/unavailable; Codex quota healthy again.
+- Live activity popup (`#activity` in index.html, styles in style.css, `updateActivity/pollActivity` in app.js): fixed bottom-right card on every page showing phase (Refreshing jobs / Reviewing saved jobs), progress bar, latest progress message, active-company chips (4 + "+N more"). Idle poll 8s, active 1.5s, paused when the tab is hidden; completion/error summary lingers 6s; ✕ hides for the current task only; clicking the card opens Jobs. renderJobs feeds it instantly; init starts the watcher.
+- Verified in a throwaway app instance on port 8770 (started and stopped; user's 8931 untouched): load-hidden, running state (bar 16%, chips), review title, completion auto-hide, dismiss semantics, dark-theme screenshot check. tests/test_glm.py expectation updated to the 3-attempt contract; performance test patches RETRY_BACKOFF=0. Suite green.
+- Backups: .cache/jobs-before-requeue-needsreview-*.sqlite3. No commit or push.
+
+## Security review and hardening (October 26)
+
+A fresh-eyes security review (three independent sweeps plus a server-core pass, every claim verified) found one high and two medium issues; all ten accepted findings are fixed on `security-fix`:
+
+- Codex kept its shell tool under `--sandbox read-only`, so injected page text could drive local file reads and stage contents through the page-answer `note` field. Codex now runs under a `sandbox-exec` Seatbelt profile denying reads of `.env`, `.ssh`, `.zcode`, keychains, preferences, and the repo (probed once per process; a missing wrapper fails open), `HOME` points at the throwaway call folder while `CODEX_HOME` stays real, and AI notes are control-stripped and capped before display.
+- Job URLs from page JSON-LD/feeds were stored unsanitized and rendered as clickable links: a `javascript:` URL in a posting could run script in the app origin. `_job` now stores only http(s) links (relative JSON-LD URLs resolve against the page base), and the frontend `el()` helper only assigns http(s) `href`/`src`.
+- `.env` held live keys world-readable: now 0600 on disk and `load_env` enforces it.
+- `check_url` resolves hostnames (a private answer is rejected; verdicts cached 5 minutes; transient DNS failure fails open) and returns normalized URLs; urllib redirects are validated before being followed via `_GuardedRedirects`, curl gets `--proto-redir =https`, and `http.client.HTTPException` joins the fallback path.
+- HTML stripping (`html_to_text`, `page_with_links`) is linear: per-candidate rescan on crafted pages could pin a worker's CPU. Unclosed elements keep their content as before.
+- CLI prints of model-derived text go through `_plain` (whole escape sequences removed, then control chars); `_SECRETS` scrub covers `ZHIPUAI_*`/`ZAI_BASE_URL`.
+- `_run` gained `agent`/`extra_env` parameters (usage rows keep the real agent name under the wrapper). Timing-safe token compare uses bytes so any header value is safe; the jobs lock opens with `O_NOFOLLOW`; Greenhouse/Lever board tokens are regex-validated.
+- LLM cache files, Typst data files, and the CLI sidecar (JD + PII) are written 0600 and atomically.
+- Tests: `tests/test_security.py` (16 tests) covers URL validation, redirect guard, stored-URL schemes, parsing parity and linearity, `_plain`, the Codex wrapper (argv/env plus a live Seatbelt deny probe), and cache permissions; four `urlopen` patches in existing tests now patch `fetch._OPENER`. Suite: 241 tests.

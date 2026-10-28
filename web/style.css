@@ -1551,6 +1551,98 @@ td {
   border-color: var(--error-line);
 }
 
+/* ------------------------------------------------------- activity popup */
+.activity {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  width: min(360px, calc(100vw - 36px));
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  animation: toastIn .3s ease;
+}
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.activity-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+}
+.activity-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: activityPulse 1.2s ease-in-out infinite;
+  flex: none;
+}
+.activity.done .activity-dot { background: var(--accent); animation: none; }
+.activity.error .activity-dot { background: var(--error-ink); animation: none; }
+@keyframes activityPulse {
+  0%, 100% { opacity: .35; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+.activity-close {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.activity-close:hover { color: var(--ink); }
+.activity-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+  margin: 2px 0 8px;
+}
+.activity-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width .4s ease;
+}
+.activity-message {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.activity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.activity-chips span {
+  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity, .activity-dot, .activity-fill { animation: none; transition: none; }
+}
+@media (max-width: 720px) {
+  .activity { left: 10px; right: 10px; bottom: 10px; width: auto; }
+}
+
 /* -------------------------------------------------------------- dialogs */
 dialog {
   width: min(460px, calc(100% - 34px));

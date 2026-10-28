@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 from contextlib import contextmanager
@@ -42,6 +43,10 @@ def load_env(path: str | Path = None) -> None:
     path = Path(path or Path(__file__).resolve().parent.parent / ".env")
     if not path.exists():
         return
+    try:
+        path.chmod(0o600)  # keys live here; keep them user-only like credentials.json
+    except OSError:
+        pass
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -133,10 +138,15 @@ def _cache_write(key: str, request: dict, response: dict, directory=None) -> Non
     directory = Path(directory or CACHE_DIR)
     directory.mkdir(parents=True, exist_ok=True)
     # The request is stored alongside for debugging. It never contains the key:
-    # auth travels in a header, not the body.
-    (directory / f"{key}.json").write_text(
-        json.dumps({"request": request, "response": response}, indent=2, ensure_ascii=False)
-    )
+    # auth travels in a header, not the body. Cache files hold prompts, so they
+    # are written user-only and atomically, like every other local secret.
+    fd, temporary = tempfile.mkstemp(dir=directory, prefix=f'.{key}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as out:
+            out.write(json.dumps({"request": request, "response": response}, indent=2, ensure_ascii=False))
+        os.replace(temporary, directory / f"{key}.json")
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 # ── the call ─────────────────────────────────────────────────────────────
