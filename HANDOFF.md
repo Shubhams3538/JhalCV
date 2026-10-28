@@ -85,3 +85,15 @@ Usage validation: 155 tests passed, including provider/cache math, failed-call a
 Final verification:180 tests passed; Python compilation, JS syntax and diff checks passed. T3 preview now works: verified147 source cards/edit controls,560pxscrollable company list, correct Jobs route and no notice error. Live targeted GitHub refresh completed23s, found1new India job and checked it withCodex; saved collection now383jobs. App reloaded only after previousrefresh finished (exclusive joblock idle); running at127.0.0.1:8765. Existing fullrefresh errors for remaining portals are retained, not claimed resolved. Optimization changes remain uncommitted on perf/job-refresh per request to commit the pre-optimization work first.
 
 Final independent review: no remaining concrete findings after regression fixes for Workday locale identity, location-filter preservation, and bidirectional URL/ID deletion tombstones. All12performance/persistence regressiontests pass. UI simulated-progress check displayed19/147 and activecompanynames, then restoredreal idle state without initiatinga refresh.
+
+## Saved-only review button (October26)
+
+- New Jobs toolbar **Review unreviewed jobs (N)** sends authenticated `/api/jobs/review` (alias of existing `/api/jobs/recheck`). `recheck_only` branches before any source collection/discovery/details. `_review_saved` snapshots all eligible-to-review unchecked saved rows, then processes24-job chunks with existing parallel8-job eligibility batches; no120-cap, no repeated completed rows, no endless retry of uncertain answers. Preserves last_refresh and updates last_review.
+- Progress uses phase=review, total/completed jobs, with polling; queue count returned by Jobs state. Emptyqueue/running disablesbutton. Re-render after task cleanup prevents generic task() from accidentally re-enabling it.
+-184 tests passed, including144-pending-job fullqueue/no-portal/completed-exclusion test, uncertainty/Applied persistence, hidden/location exclusions and authenticated/busy reviewendpoint. No remaining findings in fresh reviewer pass before final UI task-cleanup polish. Real backlog is not automatically reviewed by development checks; user starts it using the button.
+
+Saved-review final browser check: live button shows Review unreviewed jobs(240); intercepted UI click sent onlyjobs/review, displayed24/240jobsreviewed, remaineddisabledaftertaskcleanup; emptyqueuealso disabled. Realbacklogunchanged (no240-jobrunstartedbydevelopment). Reloadedidleapp at8765;147sources/383jobsretained.184tests pass plusJS/diffchecks; freshreviewfoundnoconcreteissues.
+
+## Commit checkpoint (October 26)
+
+All current work recorded on `perf/job-refresh`: optimization, portal readers and persistence fixes in `418c549` dated October 27, 2026 20:00 IST; saved-only review workflow follows as the October 28 commit. Full suite:184 tests; independent first-commit snapshot:180 tests. Both author and committer dates are set explicitly. No push performed.
