@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -82,10 +83,31 @@ def credential_scope(routes, cache_dir=None):
 
 def have_key() -> bool:
     session = _SESSION.get()
-    if session is not None:
-        return any(r['id'] not in session['failed'] for r in session['routes'])
-    from .credentials import CredentialStore
-    return bool(CredentialStore().routes())
+    if session is not None and any(r['id'] not in session['failed'] for r in session['routes']):
+        return True
+    if session is None:
+        from .credentials import CredentialStore
+        if CredentialStore().routes():
+            return True
+    return bool(cli_routes())
+
+
+def cli_routes() -> list[dict]:
+    """Codex first, then Claude Code: the same subscription-CLI order the jobs
+    pipeline uses, so tailoring also works with no API key at all. Empty when
+    the CLIs are not installed."""
+    return [{'id': f'cli:{name}', 'provider': name, 'model': model, 'cli': name}
+            for name, model in (('codex', 'codex-default'), ('claude', 'sonnet'))
+            if shutil.which(name)]
+
+
+def _cli_ask(name: str, prompt: str, schema: dict) -> dict:
+    from .jobs.agents import RUNNERS, AgentError  # lazy: jobs.agents imports this module
+    try:
+        with tempfile.TemporaryDirectory(prefix='jhalcv-tailor-') as folder:
+            return RUNNERS[name](prompt, schema, Path(folder))
+    except (AgentError, LLMError) as e:
+        raise LLMError(f'{name} CLI could not answer: {str(e)[:160]}') from None
 
 
 # ── schema helpers ───────────────────────────────────────────────────────
@@ -163,8 +185,12 @@ def ask(prompt: str, schema: dict, *, model: str = DEFAULT_MODEL,
         with credential_scope(CredentialStore().routes(openai_model=model)):
             return ask(prompt, schema, model=model, system=system, temperature=temperature,
                        schema_name=schema_name, cache=cache, timeout=timeout)
-    routes = sorted(session['routes'], key=lambda r: r['id'] != session['preferred'])
-    if not routes:
+    # GLM is out of every chain: a saved Z.AI key only serves GLM models, so it
+    # never tailors. Both chains run Codex first, then Claude Code.
+    routes = sorted((r for r in session['routes'] if r['provider'] != 'zai'),
+                    key=lambda r: r['id'] != session['preferred'])
+    cli = cli_routes()
+    if not routes and not cli:
         raise LLMAuthError('No API keys configured. Add a key in Settings or use rules mode.')
     deadline = time.monotonic() + 120
     for route in routes:
@@ -210,8 +236,50 @@ def ask(prompt: str, schema: dict, *, model: str = DEFAULT_MODEL,
         except (LLMError, OSError):
             session['failed'].add(route['id'])
             session['events'].append({'provider': route['provider'], 'status': 'failed'})
+    # API keys exhausted (or none saved): the subscription CLIs get a turn, so
+    # tailoring keeps working after a key is deleted or runs out of credits.
+    for route in cli:
+        if route['id'] in session['failed']:
+            continue
+        payload = {'version': 2, 'provider': route['provider'], 'model': route['model'],
+                   'prompt': prompt, 'system': system, 'schema': strictify(schema),
+                   'temperature': temperature, 'schema_name': schema_name}
+        cache_key = _cache_key(payload)
+        def checked(value):
+            validate_output(value, payload['schema'])
+            encoded = json.dumps(value, ensure_ascii=False)
+            if any(r.get('key') and r['key'] in encoded for r in session['routes']):
+                raise LLMError('Provider response contained sensitive data and was discarded.')
+            return value
+        try:
+            result, hit = None, False
+            if cache:
+                cached = _cache_read(cache_key, session['cache_dir'])
+                if cached is not None:
+                    try:
+                        result, hit = checked(cached), True
+                        from .usage import record_cache
+                        record_cache(route['provider'], route['model'])
+                    except LLMError:
+                        pass
+            if result is None:
+                result = checked(_cli_ask(route['cli'], prompt, schema))
+                if cache:
+                    try:
+                        _cache_write(cache_key, payload, result, session['cache_dir'])
+                    except OSError:
+                        pass
+            session['last_call_failed'] = False
+            session['preferred'] = route['id']
+            used = {'provider': route['provider'], 'model': route['model']}
+            if used not in session['used']:
+                session['used'].append(used)
+            return result, hit
+        except (LLMError, OSError):
+            session['failed'].add(route['id'])
+            session['events'].append({'provider': route['provider'], 'status': 'failed'})
     session['last_call_failed'] = True
-    raise LLMError('Configured API keys were unavailable or returned invalid responses. Using rules mode.')
+    raise LLMError('Configured API keys and AI CLIs were unavailable. Using rules mode.')
 
 
 if __name__ == "__main__":
