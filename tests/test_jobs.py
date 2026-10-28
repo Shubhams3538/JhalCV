@@ -15,14 +15,18 @@ from resume.jobs.store import JobStore
 # Tests use fake hosts; never launch the real browser unless a test asks for it.
 _no_browser = patch('resume.jobs.sources.browser', return_value=None)
 _no_resolver = patch('resume.jobs.service.resolve', return_value=None)
+# Never launch the real AI CLIs from the suite: verdicts must not depend on the
+# outside world or spend subscription tokens.
 
 
 def setUpModule():
     _no_browser.start()
     _no_resolver.start()
+    
 
 
 def tearDownModule():
+    
     _no_browser.stop()
     _no_resolver.stop()
 
@@ -254,6 +258,15 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(eligibility.rule_check('1-2 years of industry experience', 2.4)['eligible'], 'yes')
         self.assertEqual(eligibility.rule_check('Great team, 5 years old company.', 2.4)['eligible'], 'unclear')
 
+    def test_ai_date_believability(self):
+        self.assertEqual(eligibility.ai_date(date.today().isoformat()), date.today().isoformat())
+        self.assertEqual(eligibility.ai_date((date.today() - timedelta(days=7)).isoformat()),
+                         (date.today() - timedelta(days=7)).isoformat())
+        self.assertEqual(eligibility.ai_date('2030-01-01'), '')  # future
+        self.assertEqual(eligibility.ai_date('2020-01-01'), '')  # long past
+        self.assertEqual(eligibility.ai_date('October 20'), '')  # not ISO
+        self.assertEqual(eligibility.ai_date(None), '')
+
     def test_agent_answers_and_rule_fallback_per_job(self):
         class Fake:
             used = ['codex']
@@ -269,6 +282,20 @@ class EligibilityTests(unittest.TestCase):
 
 
 class StoreAndServiceTests(unittest.TestCase):
+    def test_ai_date_fills_only_undated_jobs(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = JobStore(root)
+            src = store.add_source('Acme', 'https://job-boards.greenhouse.io/acme', 'greenhouse')
+            store.save_listing(src['id'], [job('dated', 'Dated Role'), dict(job('undated', 'Undated Role'), posted='')])
+            ids = {j['title']: j['id'] for j in store.jobs()}
+            verdict = {'min_years': None, 'eligible': 'unclear', 'reason': '', 'by': 'codex',
+                       'relevant': 'unclear', 'relevance_reason': ''}
+            store.set_eligibility({ids['Dated Role']: {**verdict, 'posted': '2026-01-01'},
+                                   ids['Undated Role']: {**verdict, 'posted': date.today().isoformat()}})
+            posted = {j['title']: j['posted'] for j in store.jobs()}
+            self.assertEqual(posted['Dated Role'], job('dated')['posted'])  # a known date is never overridden
+            self.assertEqual(posted['Undated Role'], date.today().isoformat())  # an empty one accepts the AI-read date
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -437,6 +464,88 @@ class FreshnessTests(unittest.TestCase):
                          'Gurgaon, Haryana, India')
 
 
+class TestModeLimitTests(unittest.TestCase):
+    def test_test_refresh_runs_on_the_scratch_database_and_never_touches_saved_jobs(self):
+        with tempfile.TemporaryDirectory() as root:
+            main = JobService(root)
+            for i in range(25):
+                main.add_source(f'Feed {i}', f'https://job-boards.greenhouse.io/feed{i}')
+            for i in range(12):
+                main.add_source(f'Page {i}', f'https://careers{i}.test/jobs')
+            main.store.save_listing(main.store.sources()[0]['id'], [job('saved-job')])
+            saved_before = [j['id'] for j in main.store.jobs()]
+            self.assertTrue(saved_before)
+
+            lab = JobService(root, jobs_db='jobs.test.db')
+            messages = []
+            with patch.dict(sources.READERS, {'greenhouse': lambda url: [job('test-job')]}), \
+                    patch('resume.jobs.sources.page_jobs', side=lambda *a: []), \
+                    patch('resume.jobs.agents.shutil.which', return_value=None):
+                lab.refresh({'experience': []}, messages.append, test=True)
+            self.assertTrue(any('Test mode' in m for m in messages))
+
+            # The saved collection is byte-for-byte untouched: same jobs, no run
+            # history pollution, and the scratch run lives only in jobs.test.db.
+            self.assertEqual([j['id'] for j in main.store.jobs()], saved_before)
+            self.assertEqual([s['last_run_at'] for s in main.store.sources() if s['last_run_at']], [])
+            scratch = [j['url'] for j in lab.store.jobs()]
+            self.assertIn('https://x.test/test-job', scratch)
+            self.assertNotIn('https://x.test/saved-job', scratch)
+            run = [s for s in lab.store.sources() if s['last_run_at'] is not None]
+            self.assertEqual(len(run), 30)
+            self.assertEqual(sum(1 for s in run if s['kind'] != 'page'), 20)
+            self.assertEqual(sum(1 for s in run if s['kind'] == 'page'), 10)
+            self.assertTrue((Path(root) / '.local' / 'jobs.test.db').exists())
+
+    def test_slice_companies_are_drawn_at_random_from_the_whole_pool(self):
+        with tempfile.TemporaryDirectory() as root:
+            main = JobService(root)
+            for i in range(30):
+                main.add_source(f'Feed {i:02}', f'https://job-boards.greenhouse.io/feed{i}')
+            for i in range(12):
+                main.add_source(f'Page {i:02}', f'https://careers{i}.test/jobs')
+            lab = JobService(root, jobs_db='jobs.test.db')
+            picks, pools = [], []
+            real_sample = random.sample
+            def spy(pool, k):
+                pools.append((tuple(s['name'] for s in pool), k))
+                pick = real_sample(pool, k)
+                picks.append({s['name'] for s in pick})
+                return pick
+            with patch.dict(sources.READERS, {'greenhouse': lambda url: [job('test-job')]}), \
+                    patch('resume.jobs.sources.page_jobs', side=lambda *a: []), \
+                    patch('resume.jobs.agents.shutil.which', return_value=None), \
+                    patch('resume.jobs.service.random.sample', spy):
+                lab.refresh({'experience': []}, lambda _: None, test=True)
+            self.assertEqual(pools[0], (tuple(f'Feed {i:02}' for i in range(30)), 20))
+            self.assertEqual(pools[1], (tuple(f'Page {i:02}' for i in range(12)), 10))
+            self.assertEqual(len(picks[0]), 20)
+            # Two successive draws from the same pool are different samples.
+            self.assertNotEqual(picks[0], picks[1])
+
+    def test_test_refresh_on_the_main_service_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            main = JobService(root)
+            main.add_source('Feed', 'https://job-boards.greenhouse.io/feed')
+            main.store.save_listing(main.store.sources()[0]['id'], [job('saved-job')])
+            with patch.dict(sources.READERS, {'greenhouse': lambda url: []}), \
+                    patch('resume.jobs.agents.shutil.which', return_value=None):
+                with self.assertRaises(ValueError):
+                    main.refresh({'experience': []}, lambda _: None, test=True)
+            self.assertEqual(len(main.store.jobs()), 1)  # nothing was cleared
+
+    def test_normal_refresh_runs_every_company(self):
+        with tempfile.TemporaryDirectory() as root:
+            service = JobService(root)
+            for i in range(3):
+                service.add_source(f'Feed {i}', f'https://job-boards.greenhouse.io/feed{i}')
+            with patch.dict(sources.READERS, {'greenhouse': lambda url: []}), \
+                    patch('resume.jobs.agents.shutil.which', return_value=None):
+                service.refresh({'experience': []}, lambda _: None)
+            run = [s for s in service.store.sources() if s['last_run_at'] is not None]
+            self.assertEqual(len(run), 3)
+
+
 class FreshnessServiceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -468,8 +577,8 @@ class FreshnessServiceTests(unittest.TestCase):
             self.service.refresh({'experience': []}, lambda m: None)
             first_calls = len(seen)
             self.service.refresh({'experience': []}, lambda m: None)
-        self.assertEqual(first_calls, 2)  # today's jobs first, undated backlog after collection
-        self.assertEqual(len(seen), first_calls)
+        self.assertEqual(first_calls, 1)  # each finished company's jobs are judged in one call
+        self.assertEqual(len(seen), first_calls)  # unchanged jobs reuse the cached answer
         self.assertNotIn('https://x.test/old', {j['url'] for j in store.jobs()})
         rows = store.jobs()
         self.assertEqual([(j['title'], j['freshness'], j['relevant']) for j in rows],
@@ -705,7 +814,8 @@ class SimplifiedJobCategoriesTests(unittest.TestCase):
         base = dict(status='new', eligible='yes', relevant='yes', posted=date.today().isoformat())
         self.assertEqual(category(base), 'eligible')
         self.assertEqual(category(dict(base, eligible='no')), 'no')
-        self.assertEqual(category(dict(base, relevant='no')), 'no')
+        self.assertEqual(category(dict(base, relevant='no')), 'notrel')  # own section, not dropped
+        self.assertEqual(category(dict(base, eligible='no', relevant='no')), 'notrel')
         self.assertEqual(category(dict(base, eligible='unclear')), 'review')
         # Undated jobs that pass both checks are Eligible (the list marks the date unverified);
         # undated jobs not yet fully checked still wait in review.
@@ -919,7 +1029,7 @@ class CostSavingTests(unittest.TestCase):
                 service.refresh({'experience': [{'start': 'Jan 2025', 'end': 'Jun 2026'}]}, lambda m: None)
             self.assertEqual(opened, ['swe'])
             sales = next(j for j in service.store.jobs() if j['title'] == 'Account Executive')
-            self.assertEqual((sales['category'], sales['relevance_reason']), ('no', 'Sales role.'))
+            self.assertEqual((sales['category'], sales['relevance_reason']), ('notrel', 'Sales role.'))
             self.assertEqual(src['kind'], 'workday')
 
     def test_queue_wait_is_not_charged_to_the_company_budget(self):

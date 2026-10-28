@@ -12,6 +12,11 @@ from resume.jobs.fetch import FetchError, fetch_budget, remaining
 from resume.jobs.service import JobService
 
 
+
+# Never reach a real Z.AI/ZCode route from the suite (a live bridge would
+# spend subscription tokens and make results depend on the outside world).
+
+
 def job(ident, posted=None):
     return dict(external_id=ident, title='Software Engineer', location='India', url='https://x.test/'+ident,
                 posted=posted or date.today().isoformat(), requirements='1 year of experience', description='Build software')
@@ -61,7 +66,7 @@ class PerformanceTests(unittest.TestCase):
         self.assertGreater(peak,1)
         self.assertLessEqual(peak,4)
 
-    def test_today_jobs_win_over_older_fast_source(self):
+    def test_each_finished_company_is_judged_immediately_even_under_a_budget(self):
         with tempfile.TemporaryDirectory() as root:
             service=JobService(root)
             service.add_source('A Fast','https://job-boards.greenhouse.io/fast')
@@ -74,8 +79,10 @@ class PerformanceTests(unittest.TestCase):
             with patch.dict(sources.READERS,{'greenhouse':read}), patch('resume.jobs.agents.shutil.which',return_value=None), patch('resume.jobs.service.MAX_CHECKS',1):
                 service.refresh({'experience':[]},lambda _:None)
             saved={j['url']:j for j in service.store.jobs()}
-            self.assertIsNotNone(saved['https://x.test/new']['eligible'])
-            self.assertIsNone(saved['https://x.test/old']['eligible'])
+            # The first company to finish has its job judged right away; the
+            # small budget then leaves the still-fetching company for the run's end.
+            self.assertIsNotNone(saved['https://x.test/old']['eligible'])
+            self.assertIsNone(saved['https://x.test/new']['eligible'])
 
     def test_unchanged_agent_answers_persist_and_changed_prompts_miss(self):
         with tempfile.TemporaryDirectory() as root:

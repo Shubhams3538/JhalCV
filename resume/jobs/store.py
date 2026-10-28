@@ -320,15 +320,21 @@ class JobStore:
             rows = [dict(r) for r in c.execute(
                 "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
                 "FROM jobs j JOIN sources s ON s.id=j.source_id "
-                "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden' AND j.manual_eligible IS NULL")]
+                "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden' AND j.manual_eligible IS NULL "
+                "AND (j.eligible IS NULL OR j.eligible != 'no') AND (j.relevant IS NULL OR j.relevant != 'no')")]
         rows = [r for r in rows if (source_ids is None or r['source_id'] in source_ids)
                 and (r['status'] == 'applied' or location_matches(r['location'], r['locations']))]
         return newest_first(rows)[:limit]
 
     def set_eligibility(self, verdicts: dict) -> None:
         with self.db() as c:
-            c.executemany('UPDATE jobs SET min_years=?, eligible=?, reason=?, checked_by=?, relevant=?, relevance_reason=? WHERE id=?',
-                          [(v['min_years'], v['eligible'], v['reason'], v['by'], v.get('relevant', 'unclear'), v.get('relevance_reason', ''), ident) for ident, v in verdicts.items()])
+            # A verdict without 'relevant' (text-rule fallback) leaves relevance
+            # pending (NULL) for a later AI run; an AI-read date fills only a
+            # job that had none, never overriding the site's own date.
+            c.executemany('UPDATE jobs SET min_years=?, eligible=?, reason=?, checked_by=?, relevant=?, '
+                          "relevance_reason=?, posted=CASE WHEN posted='' AND ?<>'' THEN ? ELSE posted END WHERE id=?",
+                          [(v['min_years'], v['eligible'], v['reason'], v['by'], v.get('relevant'),
+                            v.get('relevance_reason', ''), v.get('posted', ''), v.get('posted', ''), ident) for ident, v in verdicts.items()])
 
     def reset_eligibility(self) -> None:
         with self.db() as c:
@@ -376,7 +382,7 @@ class JobStore:
             c.execute('DELETE FROM jobs WHERE id=?', (ident,))
 
     def delete_category(self, group):
-        if group not in ('eligible', 'no', 'applied', 'review', 'old'):
+        if group not in ('eligible', 'no', 'notrel', 'applied', 'review', 'old'):
             raise ValueError('Choose a jobs category.')
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')

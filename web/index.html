@@ -141,9 +141,15 @@
         <button class="text-button" type="button" data-delete-jobs="review">Delete all needing review</button>
         <div id="jobs-review-list"></div>
       </details>
+      <details class="jobs-drawer" id="jobs-notrel">
+        <summary>Not relevant <span id="jobs-notrel-count" class="pill">0</span></summary>
+        <p class="hint">Roles the AI judged outside your software-career scope. Kept for audit instead of deleted.</p>
+        <button class="text-button" type="button" data-delete-jobs="notrel">Delete all not-relevant jobs</button>
+        <div id="jobs-notrel-list"></div>
+      </details>
       <details class="jobs-drawer" id="jobs-old">
         <summary>Old <span id="jobs-old-count" class="pill">0</span></summary>
-        <p class="hint">Unapplied jobs more than seven days old. Removed automatically once posting age exceeds eight days, when you next open or refresh Jobs.</p>
+        <p class="hint">Unapplied jobs more than seven days old. Removed automatically once posting age exceeds eight days, when you next open or refresh.</p>
         <button class="text-button" type="button" data-delete-jobs="old">Delete all old jobs</button>
         <div id="jobs-old-list"></div>
       </details>

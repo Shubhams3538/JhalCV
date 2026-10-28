@@ -443,13 +443,15 @@ function renderJobs(data) {
     tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab),
       text: `${name} ${count}`, onclick: () => {jobsTab = id; rememberView('jobs'); renderJobs(jobsData);}}));
   }
+  $('#jobs-current-label').textContent = JOB_TABS.find(([id]) => id === jobsTab)?.[1] || 'Eligible';
   $('#jobs-review-count').textContent = data.jobs.filter(j => jobInTab(j, 'review')).length;
+  $('#jobs-notrel-count').textContent = data.jobs.filter(j => jobInTab(j, 'notrel')).length;
   $('#jobs-old-count').textContent = data.jobs.filter(j => jobInTab(j, 'old')).length;
   $('#jobs-review').hidden = jobsTab !== 'eligible';
+  $('#jobs-notrel').hidden = jobsTab !== 'eligible';
   $('#jobs-old').hidden = jobsTab !== 'eligible';
   renderJobList();
   updateActivity(data.progress);
-  $('#jobs-current-label').textContent = JOB_TABS.find(([id]) => id === jobsTab)?.[1] || 'Eligible';
   clearTimeout(jobsPoll);
   if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
 }
@@ -461,7 +463,7 @@ function syncRefreshSelected() {
 function renderJobList() {
   const data = jobsData, query = $('#jobs-search').value.trim().toLowerCase();
   const openDetails = new Set([...document.querySelectorAll('.job-row details[open]')].map(d => `${d.closest('.job-row').dataset.jobId}:${d.className}`));
-  for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['old', '#jobs-old-list']]) {
+  for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['notrel', '#jobs-notrel-list'], ['old', '#jobs-old-list']]) {
     const jobs = data.jobs.filter(j => jobInTab(j, group) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
     $('#jobs-count').textContent = data.jobs.length + ' SAVED JOBS';
     const list = $(selector); list.replaceChildren();
@@ -469,6 +471,7 @@ function renderJobList() {
     const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'], unclear: ['UNCLEAR', '']};
     for (const job of jobs) {
       const [label, tone] = job.manual_eligible === 'no' ? ['NOT ELIGIBLE · YOU', 'ineligible'] : job.relevant === 'no' ? ['NOT RELEVANT', 'missing']
+        : job.eligible === 'no' ? ['NOT ELIGIBLE', 'ineligible']
         : !job.relevant ? ['AWAITING REVIEW', ''] : verdicts[job.eligible] || ['CHECKING', ''];
       const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
       const meta = [job.company, job.location, job.freshness === 'unknown' ? 'Posting date unverified' : job.posted && 'posted ' + job.posted, job.active === 0 && 'Not returned in latest refresh'].filter(Boolean).join(' · ');
@@ -528,12 +531,13 @@ function returnToTailoredJob() {
     if (job && !`${job.title} ${job.company} ${job.location}`.toLowerCase().includes($('#jobs-search').value.trim().toLowerCase())) $('#jobs-search').value = '';
     rememberView('jobs', true);
     renderJobs(data);
+    $('#jobs-current').open = (context.listOpen ?? true) || Boolean(job && jobInTab(job, jobsTab));
     $('#jobs-review').open = Boolean(context.reviewOpen || job?.category === 'review');
+    $('#jobs-notrel').open = Boolean(context.notrelOpen || job?.category === 'notrel');
     $('#jobs-old').open = Boolean(context.oldOpen || job?.category === 'old');
     $('#jobs-sources').scrollTop = context.sourceScroll || 0;
     window.scrollTo(0, context.scrollY || 0);
     const row = [...document.querySelectorAll('.job-row')].find(row => row.dataset.jobId === String(context.id));
-    $('#jobs-current').open = (context.listOpen ?? true) || Boolean(job && jobInTab(job, jobsTab));
     if (row && job) {
       row.classList.add('returned-job');
       const rect = row.getBoundingClientRect();
@@ -741,7 +745,7 @@ function renderBenchmark(data) {
   $('#benchmark-warning').hidden = !data.persistence_warning;
   $('#benchmark-warning').textContent = 'Some timing data could not be saved. Download the current report before restarting.';
   $('#benchmarks-download').disabled = !report;
-  $('#benchmark-status').textContent = report ? `${report.mode === 'review' ? 'Saved-job review' : 'Job refresh'} · ${report.status} · ${report.elapsed_seconds.toFixed(2)} seconds elapsed · Started ${new Date(report.started_at).toLocaleString()}`
+  $('#benchmark-status').textContent = report ? `${report.mode === 'review' ? 'Saved-job review' : report.mode === 'test' ? 'Test lab run' : 'Job refresh'} · ${report.status} · ${report.elapsed_seconds.toFixed(2)} seconds elapsed · Started ${new Date(report.started_at).toLocaleString()}`
     : 'No live report yet. Your next Refresh all, Refresh selected, or Review unreviewed jobs run will be recorded automatically.';
   const table = (headings, rows) => el('table', {}, [el('thead', {}, [el('tr', {}, headings.map(text => el('th', {text})))]), el('tbody', {}, rows.map(row => el('tr', {}, row.map(text => el('td', {text: String(text)}))))) ]);
   const sec = value => Number(value || 0).toFixed(3) + 's';
@@ -867,7 +871,7 @@ async function init() {
   $('#companies-search').oninput = () => jobsData && renderJobs(jobsData);
   document.querySelectorAll('[data-delete-jobs]').forEach(button => button.onclick = e => {
     const group = button.dataset.deleteJobs || jobsTab;
-    const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', old: 'Old'};
+    const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', notrel: 'Not relevant', old: 'Old'};
     const count = jobsData?.jobs.filter(j => jobInTab(j, group)).length || 0;
     if (!count) return;
     if (!confirm(`Delete all ${count} jobs in ${names[group]}? This includes jobs hidden by search. Deleted jobs will not return on refresh.`)) return;

@@ -35,7 +35,9 @@ def category(job):
         return 'no'
     if job['status'] == 'hidden':
         return 'review'
-    if job.get('eligible') == 'no' or job.get('relevant') == 'no':
+    if job.get('relevant') == 'no':
+        return 'notrel'  # its own section, kept for audit instead of dropped
+    if job.get('eligible') == 'no':
         return 'no'
     if job.get('eligible') == 'yes' and job.get('relevant') == 'yes':
         # Some sites publish no posting date. A job that passes both checks is

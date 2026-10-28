@@ -116,11 +116,19 @@ def send(url, headers, body, timeout):
         # Never expose response bodies or exception text: providers can echo
         # request headers, and neither reports nor browser errors may contain keys.
         unsupported_temperature = False
-        if e.code == 400:
+        no_balance = False
+        if e.code in (400, 429):
             detail = e.read(4000).decode(errors='replace').lower()
             unsupported_temperature = 'temperature' in detail and ('unsupported' in detail or 'not support' in detail)
+            # Z.AI reports an empty pay-as-you-go balance as HTTP 429 code 1113;
+            # no amount of retrying can clear it, so it gets its own message the
+            # jobs agent chain can recognize and skip the provider for the run.
+            no_balance = 'insufficient balance' in detail or 'no resource package' in detail
         if e.code in (401, 403):
             raise LLMAuthError('Provider rejected this API key.', status=e.code) from None
+        if no_balance:
+            raise LLMError('Provider account has insufficient balance or no resource package.',
+                           status=e.code) from None
         raise LLMError(f'Provider request failed (HTTP {e.code}).', status=e.code,
                        body='unsupported temperature' if unsupported_temperature else '') from None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
