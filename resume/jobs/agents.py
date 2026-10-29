@@ -278,6 +278,15 @@ class Agents:
                 with self._state_lock:
                     self.chain_failures = 0
                 return answer
+            # Three spaced tries all failed: a throttle that outlasts one ask
+            # would otherwise be re-paid by every later ask of this run, so the
+            # provider sits out the rest of the run like an exhausted account.
+            error = errors.get(name, '')
+            if name in self.failed or 'http 429' in error.lower() or 'rate limit' in error.lower():
+                if name not in self.failed:
+                    with self._state_lock:
+                        self.failed[name] = error
+                continue
         if not self.order:
             raise AgentError('No job AI is available: add a Z.AI key in Settings, or install Codex or Claude Code.')
         with self._state_lock:

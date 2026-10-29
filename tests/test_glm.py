@@ -74,6 +74,25 @@ class GlmJobAgentTests(unittest.TestCase):
                 runner.ask('q', SCHEMA)
         self.assertEqual(set(runner.failed), {'glm-flash', 'glm'})
 
+    def test_a_throttle_that_outlasts_one_ask_disables_the_provider_for_the_run(self):
+        calls = []
+        def fake_call(route, prompt, schema, system, temperature, name, timeout):
+            calls.append(route['model'])
+            if route['model'] == 'GLM-5.3-Flash':
+                raise provider_api.LLMError('Provider request failed (HTTP 429).')
+            return {'ok': True}
+        with patch('resume.jobs.agents._glm_route', return_value=ROUTE), \
+                patch('resume.jobs.agents.shutil.which', return_value=None), \
+                patch('resume.jobs.agents.RETRY_BACKOFF', 0), \
+                patch('resume.provider_api.call', side_effect=fake_call):
+            runner = agents.Agents()
+            self.assertEqual(runner.ask('first', SCHEMA), {'ok': True})
+            self.assertEqual(calls, ['GLM-5.3-Flash'] * agents.AGENT_ATTEMPTS + ['GLM-5.3'])
+            self.assertEqual(runner.ask('second', SCHEMA), {'ok': True})
+        # The still-throttled provider is not retried by later asks of this run.
+        self.assertEqual(calls, ['GLM-5.3-Flash'] * agents.AGENT_ATTEMPTS + ['GLM-5.3'] * 2)
+        self.assertEqual(runner.used, ['glm'])
+
 
 class ZcodeBridgeConsentTests(unittest.TestCase):
     def setUp(self):

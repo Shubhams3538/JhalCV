@@ -51,6 +51,7 @@ class JobService:
         self.lock_path = self.root / '.local' / 'jobs.lock'
         self.progress = {'running': False, 'message': '', 'finished_at': None, 'error': None}
         self._guard = threading.Lock()
+        self._last_prune = None
 
     # settings
     def experience_years(self, profile: dict) -> dict:
@@ -362,7 +363,12 @@ class JobService:
                 pass  # One unreadable posting is skipped; it keeps its unknown date and retries next time.
 
     def state(self, profile: dict) -> dict:
-        self.store.prune_old()
+        # The frontend polls this every couple of seconds during a refresh; the
+        # pruning write transaction only needs to run about once a minute.
+        now = time.monotonic()
+        if self._last_prune is None or now - self._last_prune >= 60:
+            self._last_prune = now
+            self.store.prune_old()
         return {'sources': [{**s, 'label': sources.LABELS.get(s['kind'], 'Career page')} for s in self.store.sources()],
                 'jobs': self.store.jobs(), 'progress': dict(self.progress),
                 'experience': self.experience_years(profile),
