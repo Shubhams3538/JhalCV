@@ -101,6 +101,21 @@ class CliPlainTests(unittest.TestCase):
 
 
 class CodexSandboxTests(unittest.TestCase):
+    def test_codex_resolves_launcher_symlink_before_entering_sandbox(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            target = root / 'real-codex'
+            target.touch()
+            link = root / 'codex'
+            link.symlink_to(target)
+            with patch.object(agents.shutil, 'which', return_value=str(link)), \
+                    patch.object(agents, '_seatbelt', return_value=['sandbox-exec', '-f', 'profile']), \
+                    patch.object(agents, '_run') as run:
+                (root / 'answer.json').write_text('{"ok":true}')
+                self.assertEqual(agents._codex('test', {'type': 'object'}, root), {'ok': True})
+            self.assertEqual(run.call_args.args[0][3], str(target.resolve()))
+            self.assertEqual(run.call_args.kwargs['agent'], 'codex')
+
     def test_codex_wraps_in_seatbelt_and_overrides_home(self):
         with tempfile.TemporaryDirectory() as folder:
             proc = Mock(returncode=0, stdout='', stderr='')

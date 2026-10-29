@@ -119,9 +119,16 @@ def _seatbelt() -> list[str]:
 def _codex(prompt: str, schema: dict, folder: Path):
     schema_path, out_path = folder / 'schema.json', folder / 'answer.json'
     schema_path.write_text(json.dumps(schema))
+    # Installers commonly put a symlink in ~/.local/bin, which the secret
+    # sandbox deliberately denies. Execute its real target, without weakening
+    # that restriction for other files under ~/.local.
+    executable = shutil.which('codex')
+    if not executable:
+        raise AgentError('could not start (Codex is not installed)')
+    executable = str(Path(executable).resolve())
     # HOME points at the empty call folder so ~-based reads find nothing, while
     # CODEX_HOME stays real so authentication still works.
-    _run([*_seatbelt(), 'codex', 'exec', '--json', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config',
+    _run([*_seatbelt(), executable, 'exec', '--json', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config',
           '--ignore-rules', '--sandbox', 'read-only', '-C', str(folder), '--output-schema', str(schema_path),
           '-o', str(out_path), '-'], prompt, folder, agent='codex',
          extra_env={'HOME': str(folder), 'CODEX_HOME': os.environ.get('CODEX_HOME') or str(Path.home() / '.codex')})
