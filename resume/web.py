@@ -322,6 +322,10 @@ def handler(app):
                     return self.reply(400, {'error': str(e)})
                 except OSError:
                     return self.reply(503, {'error': 'Timing reports are currently unavailable.'})
+            if path == '/api/jobs/progress':
+                # The live activity watcher polls this every couple of seconds;
+                # it needs the run state, not the whole saved collection.
+                return self.reply(200, {'progress': dict(app.jobs.progress)})
             if path == '/api/jobs':
                 try:
                     return self.reply(200, app.jobs.state(app.store.profile()))

@@ -96,7 +96,7 @@ function scheduleActivity(delay) {
 async function pollActivity() {
   if (document.hidden) { scheduleActivity(ACTIVITY_IDLE_MS); return; }
   try {
-    const data = await api('jobs');
+    const data = await api('jobs/progress');
     updateActivity(data.progress);
     scheduleActivity(data.progress && data.progress.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
   } catch { scheduleActivity(ACTIVITY_IDLE_MS); }

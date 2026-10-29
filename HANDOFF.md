@@ -185,3 +185,13 @@ Mined the 10-minute full-refresh benchmark (per-company + per-stage inclusive sp
 - `_run` gained `agent`/`extra_env` parameters (usage rows keep the real agent name under the wrapper). Timing-safe token compare uses bytes so any header value is safe; the jobs lock opens with `O_NOFOLLOW`; Greenhouse/Lever board tokens are regex-validated.
 - LLM cache files, Typst data files, and the CLI sidecar (JD + PII) are written 0600 and atomically.
 - Tests: `tests/test_security.py` (16 tests) covers URL validation, redirect guard, stored-URL schemes, parsing parity and linearity, `_plain`, the Codex wrapper (argv/env plus a live Seatbelt deny probe), and cache permissions; four `urlopen` patches in existing tests now patch `fetch._OPENER`. Suite: 241 tests.
+
+## Performance pass, systems review (October 26, night)
+
+Mined the 10-minute full-refresh benchmark (per-company + per-stage inclusive spans), then fixed what the evidence supported. jobs.db backup before the A/B: `.cache/jobs-before-perf-pass-*.sqlite3`.
+
+- **Browser slots 4 → 6** (`fetch._BROWSERS`): browser_queue was the scarcest resource (2,835s of wait across 81 renders in the full run). A/B on a 12-company render-heavy subset (Apple, Rippling, Quadeye, …, cached pages so no new AI spend): wall 235.6s → 194.4s (−18%), browser_queue 1,525s → 946s (−38%); expected ~1–1.5 min off browser-bound full refreshes. Portal flakiness adds run-to-run noise (failure sets differed between the A/B runs).
+- **AI chain under a hard throttle**: `_ask` retries each provider 3×, and 429s are deliberately retryable — but a plan throttled all night made every later ask re-pay 6 failed calls + backoff before Codex. Now, when a provider exhausts all its attempts within one ask on `http 429`/`rate limit`, it sits out the rest of the run (same as exhausted accounts). Within-ask retry behavior is unchanged (existing retry test still passes); a new test pins that a second ask skips the throttled provider.
+- **`prune_old()` left the polling path**: `state()` pruned on every `/api/jobs` read — a write transaction + full scan ~2×/second during refresh (two pollers), contending with the refresh's own writes. Now throttled to once per 60s (`JobService._last_prune`); refresh's own prunes unchanged.
+- **Halved poll bandwidth**: the activity watcher (`pollActivity`, 1.5s cadence during a run) fetched the full ~1,000-row jobs payload just to read `progress`. New lightweight `GET /api/jobs/progress` returns only the run state; the watcher uses it, the 2s live-list poll keeps the full payload (live verdicts preserved).
+- New tests: tests/test_perf.py (prune throttle), progress endpoint in test_web.py, throttle-exhaustion in test_glm.py.

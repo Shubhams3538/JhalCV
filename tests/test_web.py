@@ -37,6 +37,13 @@ class WebTests(unittest.TestCase):
         with urllib.request.urlopen(req) as response:
             return json.load(response)
 
+    def test_progress_endpoint_returns_run_state_without_the_collection(self):
+        self.app.jobs.progress.update(running=True, message='5/9 companies completed')
+        light = self.request('/api/jobs/progress')
+        self.assertEqual(light['progress']['message'], '5/9 companies completed')
+        self.assertNotIn('jobs', light)
+        self.assertNotIn('sources', light)
+
     def test_usage_persistence_and_authenticated_reference_setting(self):
         usage = self.request('/api/usage')
         self.assertEqual(usage['total']['calls'], 0)
