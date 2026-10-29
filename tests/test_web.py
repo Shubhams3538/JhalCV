@@ -7,6 +7,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from contextlib import nullcontext
 
 from resume.web import App, handler
 
@@ -14,6 +15,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebTests(unittest.TestCase):
+    def test_tailored_draft_survives_cli_failover_during_job_search(self):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'rules'})
+        self.app.jobs.progress['running'] = True
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        for provider, name in [('claude', 'Claude Code'), ('codex', 'Codex'), ('openai', 'OpenAI')]:
+            with self.subTest(provider=provider):
+                session = {'events': [{'provider': 'openai', 'status': 'failed'}],
+                           'used': [{'provider': provider, 'model': 'test'}], 'last_call_failed': False}
+                with patch('resume.web.llm.credential_scope', return_value=nullcontext(session)), \
+                        patch('resume.web.rewrite_projects', side_effect=lambda data, jd, settings: (data, '')):
+                    result = self.request('/api/tailor', {
+                        'jd': 'Backend engineer building Python REST APIs and reliable database services.',
+                        'projects': [profile['projects'][0]['id']]}, headers)
+                self.assertIn(name, result['notice'])
+                self.assertTrue(result['projects'])
+                self.assertEqual(self.app.drafts[result['id']]['report']['providers_used'], session['used'])
+        self.assertEqual(self.app.store.profile(), profile)
+        self.assertTrue(self.app.jobs.progress['running'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

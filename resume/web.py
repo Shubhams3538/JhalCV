@@ -27,6 +27,7 @@ from .render import RenderError
 from .folders import choose_folder
 from .insights import Insights, add_skill
 from .jobs.service import JobService
+from .jobs.agents import NAMES as CLI_NAMES
 from .usage import usage_scope
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -234,9 +235,10 @@ class App:
         if not session['events']:
             return ''
         if session['used'] and not session['last_call_failed']:
-            name = PROVIDERS[session['used'][-1]['provider']]['name']
-            return f' A configured key failed; automatically continued with {name}.'
-        return ' Configured keys were unavailable; original wording and rules were used.'
+            provider = session['used'][-1]['provider']
+            name = CLI_NAMES.get(provider) or PROVIDERS.get(provider, {}).get('name') or 'another AI provider'
+            return f' An AI provider failed; automatically continued with {name}.'
+        return ' AI providers were unavailable; original wording and rules were used.'
 
     def get_draft(self, ident):
         draft = self.drafts.get(ident) if isinstance(ident, str) else None
