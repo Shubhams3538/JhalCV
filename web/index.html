@@ -101,7 +101,7 @@
   </div>
   <div id="jobs-board" class="jobs-pane">
     <article class="panel">
-      <div class="panel-head"><h2>Jobs</h2><span id="jobs-count" class="pill">0 JOBS</span></div>
+      <div class="panel-head"><h2>Jobs</h2></div>
       <div class="jobs-toolbar">
         <div class="jobs-toolbar-actions">
           <button id="jobs-refresh" class="primary" type="button">Refresh all ↻</button>
@@ -120,7 +120,6 @@
             </div>
           </details>
         </div>
-        <span id="jobs-progress" class="hint" role="status" aria-live="polite"></span>
       </div>
       <div class="jobs-category-tools">
         <div id="jobs-tabs" class="jobs-tabs" role="tablist"></div>
@@ -131,7 +130,10 @@
         <label class="sr-only" for="jobs-search">Search jobs</label>
         <input id="jobs-search" type="search" placeholder="Search title, company or location">
       </div>
-      <div id="jobs-list"></div>
+      <details class="jobs-drawer jobs-section" id="jobs-current" open>
+        <summary><span id="jobs-current-label">Eligible</span><span id="jobs-count" class="pill">0 SAVED JOBS</span></summary>
+        <div id="jobs-list"></div>
+      </details>
       <details class="jobs-drawer" id="jobs-review">
         <summary>Needs review <span id="jobs-review-count" class="pill">0</span></summary>
         <p class="hint">Missing or uncertain dates, pending checks, and uncertain matches. These do not appear in Eligible.</p>
@@ -214,6 +216,19 @@
     <button id="insights-unhide" class="text-button" hidden>Show hidden skills</button>
     <button id="insights-reset" class="text-button">Reset insights</button>
   </div>
+  <div class="page-title">
+    <div class="eyebrow">VERIFY CHANGES CHEAPLY</div>
+    <h1>The<br><em>test lab.</em></h1>
+    <p>Run a scaled-down collection to verify changes without burning your subscription: every saved job is cleared, then 20 direct-feed companies and 10 career-page companies are collected and AI-judged from scratch.</p>
+  </div>
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Test refresh</h2>
+    </div>
+    <p class="hint">What happens: the whole jobs collection is emptied (your companies and their filters are kept), a backup of the cleared jobs is written to <code>.cache/jobs-before-test-refresh.sqlite3</code>, then only the 30-company slice runs. The activity popup follows the run live and the Jobs page fills as companies finish. Run <em>Refresh all</em> on the Jobs page afterwards to rebuild the full collection.</p>
+  </article>
+</section>
+
 </section>
 
 <section id="benchmarks" class="view" hidden>

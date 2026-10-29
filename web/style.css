@@ -742,6 +742,56 @@ details[open] > summary::before {
 .jobs-drawer > summary:hover {
   color: var(--ink);
 }
+/* Long lists scroll beneath their section header: every section band stays
+   pinned under the topbar, so Eligible and Needs review never blur together
+   while scrolling. Needs review carries the warning palette and a broad
+   double rule so the two lists read as different sections at a glance. */
+.jobs-section > summary,
+#jobs-review > summary,
+#jobs-old > summary {
+  position: sticky;
+  top: 64px;
+  z-index: 6;
+  background: var(--surface);
+}
+.jobs-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--ink);
+}
+.jobs-section > summary .pill {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+}
+#jobs-review {
+  border-top: 3px double var(--ink-2);
+}
+#jobs-review > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--ink);
+}
+#jobs-review > summary .pill {
+  margin-left: auto;
+}
+#jobs-review[open] > summary {
+  box-shadow: 0 10px 18px rgba(0, 0, 0, .3);
+}
+#jobs-old > summary {
+  color: var(--muted);
+}
 .jobs-drawer > summary .pill {
   margin-left: 8px;
 }
@@ -1042,17 +1092,6 @@ details[open] > summary::before {
 }
 .jobs-toolbar .secondary {
   white-space: nowrap;
-}
-#jobs-progress {
-  display: block;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-  min-height: 1.2em;
-}
-#jobs-progress.warning {
-  color: var(--warning-ink);
 }
 .filter-options {
   margin: 14px 0 4px;

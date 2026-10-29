@@ -386,15 +386,6 @@ function renderJobs(data) {
     ? `Using your own value. Your profile dates add up to ${exp.computed} years.`
     : `Calculated from your profile's experience dates (${exp.computed} years). Change it if some roles should not count.`;
   $('#jobs-years-reset').hidden = !exp.custom;
-  const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
-  const active = (data.progress.active || []).join(', ');
-  const progress = data.progress.total != null
-    ? `${data.progress.completed || 0}/${data.progress.total} ${data.progress.phase === 'review' ? 'jobs reviewed' : 'companies completed'}${active ? ' · Active: ' + active : ''}. ${data.progress.message}`
-    : data.progress.message;
-  $('#jobs-progress').textContent = running ? progress
-    : data.progress.error ? 'Last refresh failed: ' + data.progress.error
-    : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
-  $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
   $('#jobs-refresh').disabled = running;
   $('#jobs-refresh').textContent = running && data.progress.phase !== 'review' ? 'Refreshing…' : 'Refresh all ↻';
   const pending = data.unreviewed_count ?? data.jobs.filter(j => !j.relevant || !j.eligible).length;
@@ -414,6 +405,7 @@ function renderJobs(data) {
   $('#jobs-old').hidden = jobsTab !== 'eligible';
   renderJobList();
   updateActivity(data.progress);
+  $('#jobs-current-label').textContent = JOB_TABS.find(([id]) => id === jobsTab)?.[1] || 'Eligible';
   clearTimeout(jobsPoll);
   if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
 }
@@ -497,6 +489,7 @@ function returnToTailoredJob() {
     $('#jobs-sources').scrollTop = context.sourceScroll || 0;
     window.scrollTo(0, context.scrollY || 0);
     const row = [...document.querySelectorAll('.job-row')].find(row => row.dataset.jobId === String(context.id));
+    $('#jobs-current').open = (context.listOpen ?? true) || Boolean(job && jobInTab(job, jobsTab));
     if (row && job) {
       row.classList.add('returned-job');
       const rect = row.getBoundingClientRect();
@@ -508,7 +501,7 @@ function returnToTailoredJob() {
 async function tailorForJob(job) {
   const context = {id: job.id, title: job.title, company: job.company, url: job.url, tab: jobsTab,
     search: $('#jobs-search').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
-    reviewOpen: $('#jobs-review').open, oldOpen: $('#jobs-old').open};
+    listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open, oldOpen: $('#jobs-old').open};
   const detail = await api('jobs/detail', {id: job.id});
   if (!detail.description.trim()) throw new Error('This job has no description saved yet. Refresh, or open the job and paste its description.');
   $('#jd').value = `${detail.title} at ${detail.company}${detail.location ? ' (' + detail.location + ')' : ''}\n\n${detail.description}`.slice(0, 30000);
