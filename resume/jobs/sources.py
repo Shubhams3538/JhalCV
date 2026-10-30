@@ -705,9 +705,22 @@ def oracle(url: str) -> list[dict]:
 def oracle_detail(item: dict) -> dict:
     info = (get_json(item['needs_detail']).get('items') or [{}])[0]
     text = lambda key: html_to_text(info.get(key) or '')
+    # Oracle renders public attributes (including "Years") above the JD.
+    # Keep experience first so it survives the review prompt's text budget.
+    fields = []
+    for field in info.get('requisitionFlexFields') or []:
+        if not isinstance(field, dict):
+            continue
+        label, value = field.get('Prompt'), field.get('Value')
+        if isinstance(label, str) and isinstance(value, (str, int, float)) and str(value).strip():
+            fields.append((html_to_text(label), html_to_text(str(value))))
+    fields.sort(key=lambda pair: not re.search(r'\byears?\b|experience', pair[0], re.I))
+    metadata = '\n'.join(f'{label}: {value}' for label, value in fields)
     quals = '\n'.join(x for x in (text('ExternalQualificationsStr'), text('ExternalResponsibilitiesStr')) if x)
     description = '\n\n'.join(x for x in (text('ExternalDescriptionStr'), quals) if x)
-    return {'requirements': (quals or description)[:20000], 'description': description[:30000],
+    requirements = '\n\n'.join(x for x in (metadata, quals or description) if x)
+    description = '\n\n'.join(x for x in (metadata, description) if x)
+    return {'requirements': requirements[:20000], 'description': description[:30000],
             'posted': _date(info.get('ExternalPostedStartDate'))}
 
 

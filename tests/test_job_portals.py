@@ -8,6 +8,40 @@ from resume.jobs import fetch as fetchmod
 from resume.jobs.fetch import FetchError
 
 
+class OracleDetailsTests(unittest.TestCase):
+    @patch('resume.jobs.sources.get_json')
+    def test_experience_above_description_is_included_before_long_responsibilities(self, get):
+        get.return_value = {'items': [{
+            'ExternalDescriptionStr': '<p>Platform software development.</p>',
+            'ExternalResponsibilitiesStr': '<p>Build and maintain APIs.</p>' * 200,
+            'ExternalPostedStartDate': '2026-10-27T07:14:00Z',
+            'requisitionFlexFields': [
+                {'Prompt': 'Role', 'Value': 'Individual Contributor'},
+                {'Prompt': 'Years', 'Value': '3 to 5+ years'},
+                {'Prompt': 'Additional Info', 'Value': 'No visa sponsorship'},
+                {'Prompt': 'Empty', 'Value': None}]}]}
+        data = sources.oracle_detail({'needs_detail': 'https://example.test/detail'})
+        self.assertTrue(data['requirements'].startswith('Years: 3 to 5+ years'))
+        self.assertIn('Years: 3 to 5+ years', data['description'])
+        self.assertIn('Build and maintain APIs.', data['requirements'])
+        self.assertNotIn('Empty:', data['requirements'])
+        self.assertEqual(data['posted'], '2026-10-27')
+
+    @patch('resume.jobs.sources.get_json')
+    def test_missing_metadata_preserves_description_fallback(self, get):
+        get.return_value = {'items': [{'ExternalDescriptionStr': '<p>Build software.</p>'}]}
+        data = sources.oracle_detail({'needs_detail': 'https://example.test/detail'})
+        self.assertEqual(data['requirements'], 'Build software.')
+
+    @patch('resume.jobs.sources.get_json')
+    def test_metadata_does_not_hide_experience_in_description(self, get):
+        get.return_value = {'items': [{'ExternalDescriptionStr': '<p>Requires 4 years of experience.</p>',
+                                      'requisitionFlexFields': [{'Prompt': 'Role', 'Value': 'Engineer'}]}]}
+        data = sources.oracle_detail({'needs_detail': 'https://example.test/detail'})
+        self.assertIn('Role: Engineer', data['requirements'])
+        self.assertIn('Requires 4 years of experience.', data['requirements'])
+
+
 def fake_get_json(map_by_prefix):
     """get_json stub keyed by the first path segment(s) of the URL."""
     def get(url):
