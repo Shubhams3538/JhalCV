@@ -142,17 +142,22 @@ class JobService:
         Only this service's own scratch store is emptied; the saved collection
         in jobs.db is never opened for writing. The company list (and the
         experience override) is copied in so the slice matches the real setup."""
-        self.store.reset_collection()
         main = JobStore(self.root)
         with main.db() as c:
             rows = [dict(r) for r in c.execute(
                 'SELECT name, url, kind, include, exclude, locations FROM sources ORDER BY id')]
             years = c.execute("SELECT value FROM meta WHERE key='experience_years'").fetchone()
-        for row in rows:
-            self.store.add_source(row['name'], row['url'], row['kind'],
-                                  row['include'], row['exclude'], row['locations'])
-        if years:
-            self.store.set_meta('experience_years', years['value'])
+        # Replace the previous scratch snapshot atomically. reset_collection()
+        # intentionally preserves sources and therefore cannot seed a rerun.
+        with self.store.db() as c:
+            c.execute('DELETE FROM jobs')
+            c.execute('DELETE FROM dismissed_jobs')
+            c.execute('DELETE FROM sources')
+            c.execute("DELETE FROM meta WHERE key IN ('last_refresh', 'last_review', 'experience_years')")
+            c.executemany('INSERT INTO sources (name,url,kind,include,exclude,locations,created_at) VALUES (?,?,?,?,?,?,?)',
+                          [(r['name'], r['url'], r['kind'], r['include'], r['exclude'], r['locations'], int(time.time())) for r in rows])
+            if years:
+                c.execute("INSERT INTO meta (key,value) VALUES ('experience_years',?)", (years['value'],))
 
     def refresh(self, profile: dict, say=print, *, recheck_only=False, source_ids=None, test=False) -> str:
         """Refresh every source, or only `source_ids` when given. Experience and

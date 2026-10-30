@@ -465,6 +465,24 @@ class FreshnessTests(unittest.TestCase):
 
 
 class TestModeLimitTests(unittest.TestCase):
+    def test_repeated_scratch_runs_replace_sources_and_experience(self):
+        with tempfile.TemporaryDirectory() as root:
+            main = JobService(root)
+            source = main.store.add_source('First', 'https://jobs.lever.co/first', 'lever')
+            main.store.set_meta('experience_years', '1.5')
+            lab = JobService(root, jobs_db='jobs.test.db')
+            lab._test_reset()
+            lab.store.save_listing(lab.store.sources()[0]['id'], [job('old-test')])
+            main.store.remove_source(source['id'])
+            main.store.add_source('Second', 'https://jobs.lever.co/second', 'lever', locations='India')
+            main.store.set_meta('experience_years', None)
+            lab._test_reset()
+            lab._test_reset()  # duplicate URLs must not break any later run
+            self.assertEqual([s['name'] for s in lab.store.sources()], ['Second'])
+            self.assertEqual(lab.store.jobs(), [])
+            self.assertIsNone(lab.store.get_meta('experience_years'))
+            self.assertEqual([s['name'] for s in main.store.sources()], ['Second'])
+
     def test_test_refresh_runs_on_the_scratch_database_and_never_touches_saved_jobs(self):
         with tempfile.TemporaryDirectory() as root:
             main = JobService(root)
