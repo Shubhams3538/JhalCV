@@ -204,3 +204,11 @@ The Test lab no longer clears anything. A test refresh runs on its own scratch d
 - Test lab page shows a live category summary + job list from the scratch DB while the run progresses; confirm dialog says jobs are not touched. The old wipe+backup flow is gone.
 - 250 tests pass, including: scratch run leaves the main DB byte-identical (same job ids, no run-history pollution), main-service test refusal, normal refresh unchanged. Note: the 8931 server process predates this change and still contains the wipe-based code until restarted.
 - Concurrency note: another session ran `pytest tests/ -q` and a 30-company run against the real DB during this work; the final state (423 jobs, 367 pending relevance) came from that external run, not from the Test lab code. No commit or push.
+
+
+## Test lab / Codex regression repairs (October26)
+
+- Reproduced actual CLI failure: Seatbelt denies ~/.local, so invoking the codex launcher symlink in ~/.local/bin failed with execvp/no such file. Resolve shutil.which('codex') to its real target before entering the existing sandbox; secret-path denies remain. Real structured-output smoke succeeded; a two-job eligibility batch at1.5years returned Codex yes for1required, no for7required.
+- Repeated scratch seeding failed on duplicate company URLs because reset_collection preserves sources. Replace scratch jobs/tombstones/sources and stale experience override atomically from the current main snapshot. Saved collection stays intact.
+- Test lab always renders errors/empty results and shows reviewer counts; transient polling failures retry. Activity completion selects the latest finished main/scratch run, so a scratch failure cannot become idle main's Done.
+- Regression coverage: repeated scratch reset with removed/changed companies and experience; Codex symlink resolution; frontend functions exercised in Node VM for error display, completion selection and poll recovery. Real saved jobs were not refreshed/reviewed. Server left stopped. Verification:238 tests passed plus JavaScript syntax and diff checks. Changes are bundled as GLM cleanup, Codex launcher repair, scratch snapshot repair, and Test lab feedback repair, dated October28–31 respectively (21:00 IST each day); no push requested.

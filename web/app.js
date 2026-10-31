@@ -106,6 +106,13 @@ function renderTestLab(data) {
   wrap.replaceChildren(
     el('p', {class: 'hint', text: (data.jobs || []).length
       ? `${data.jobs.length} test job(s) — ` + parts.join(' · ') : 'No test jobs collected yet.'}));
+  if (data.progress?.error) wrap.prepend(el('p', {class: 'error', text: 'Test failed: ' + data.progress.error}));
+  const judges = {};
+  for (const job of data.jobs || []) {
+    const name = job.checked_by || 'Not checked';
+    judges[name] = (judges[name] || 0) + 1;
+  }
+  if (Object.keys(judges).length) wrap.append(el('p', {class: 'hint', text: 'Reviewed by: ' + Object.entries(judges).map(([name, n]) => `${name}: ${n}`).join(' · ') + '. Rules cannot finish the relevance review.'}));
   const list = el('div', {class: 'testlab-list'});
   for (const job of (data.jobs || []).slice(0, 300)) {
     const [label, tone] = TEST_CATEGORY_LABELS[job.category] || [job.category, ''];
@@ -128,9 +135,20 @@ async function updateTestLab() {
     const data = await api('jobs/test');
     if (revision !== viewRevision) return;  // the user moved on to another page
     button.disabled = Boolean(data.progress && data.progress.running);
-    if ((data.jobs && data.jobs.length) || (data.progress && data.progress.running)) renderTestLab(data);
+    renderTestLab(data);
     if (data.progress && data.progress.running) testLabPoll = setTimeout(updateTestLab, 1500);
-  } catch { /* leave the button enabled; the server rejects concurrent starts */ }
+  } catch {
+    if (revision === viewRevision) testLabPoll = setTimeout(updateTestLab, 3000);
+  }
+}
+
+let lastActivitySource = null;
+function activityProgress(data) {
+  const main = data.progress, test = data.test_progress;
+  if (main?.running) { lastActivitySource = 'main'; return main; }
+  if (test?.running) { lastActivitySource = 'test'; return test; }
+  if (test?.finished_at && test.finished_at === main?.finished_at && lastActivitySource === 'test') return test;
+  return (test?.finished_at || 0) > (main?.finished_at || 0) ? test : (main || test);
 }
 
 async function pollActivity() {
@@ -138,8 +156,7 @@ async function pollActivity() {
   try {
     const data = await api('jobs/progress');
     // A Test-lab run reports on the scratch service; show whichever is active.
-    const main = data.progress, test = data.test_progress;
-    const live = (main && main.running) ? main : (test && test.running) ? test : (main || test);
+    const live = activityProgress(data);
     updateActivity(live);
     scheduleActivity(live && live.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
   } catch { scheduleActivity(ACTIVITY_IDLE_MS); }
