@@ -356,6 +356,7 @@ function showView(view, remember = true, onJobs = null) {
   $('#breadcrumb').textContent = VIEW_LABELS[view];
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
+  if (view === 'jobs') $('#jobs-current').open = true;
   if (view === 'jobs') api('jobs').then(data => {if (revision === viewRevision) (onJobs || renderJobs)(data);}).catch(e => notify(e.message, true));
   if (view === 'testlab') updateTestLab();
   if (view === 'benchmarks') loadBenchmark();
@@ -457,9 +458,11 @@ function renderJobs(data) {
   const tabs = $('#jobs-tabs'); tabs.replaceChildren();
   for (const [id, name] of JOB_TABS) {
     const count = data.jobs.filter(j => jobInTab(j, id)).length;
-    tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab),
-      text: `${name} ${count}`, onclick: () => {jobsTab = id; rememberView('jobs'); renderJobs(jobsData);}}));
+    tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab), 'data-category': id,
+      text: `${name} ${count}`, onclick: () => {jobsTab = id; $('#jobs-current').open = true; rememberView('jobs'); renderJobs(jobsData);}}));
   }
+  $('#jobs-current').dataset.category = jobsTab;
+  $('#jobs-saved-count').textContent = `${data.jobs.length} saved jobs`;
   $('#jobs-current-label').textContent = JOB_TABS.find(([id]) => id === jobsTab)?.[1] || 'Eligible';
   $('#jobs-review-count').textContent = data.jobs.filter(j => jobInTab(j, 'review')).length;
   $('#jobs-notrel-count').textContent = data.jobs.filter(j => jobInTab(j, 'notrel')).length;
@@ -482,7 +485,9 @@ function renderJobList() {
   const openDetails = new Set([...document.querySelectorAll('.job-row details[open]')].map(d => `${d.closest('.job-row').dataset.jobId}:${d.className}`));
   for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['notrel', '#jobs-notrel-list'], ['old', '#jobs-old-list']]) {
     const jobs = data.jobs.filter(j => jobInTab(j, group) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
-    $('#jobs-count').textContent = data.jobs.length + ' SAVED JOBS';
+    const total = data.jobs.filter(j => jobInTab(j, group)).length;
+    const count = group === jobsTab ? $('#jobs-count') : $(`#jobs-${group}-count`);
+    count.textContent = query ? `${jobs.length} of ${total}` : String(total);
     const list = $(selector); list.replaceChildren();
     if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
     const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'], unclear: ['UNCLEAR', '']};
@@ -493,7 +498,11 @@ function renderJobList() {
       const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
       const meta = [job.company, job.location, job.freshness === 'unknown' ? 'Posting date unverified' : job.posted && 'posted ' + job.posted, job.active === 0 && 'Not returned in latest refresh'].filter(Boolean).join(' · ');
       const actions = el('div', {class: 'job-actions'}, [el('button', {type: 'button', class: 'secondary', text: 'Tailor resume', onclick: e => task(e.target, () => tailorForJob(job))})]);
-      const more = el('details', {class: 'job-more'}, [el('summary', {text: 'More', 'aria-label': `More actions for ${job.title}`})]);
+      const more = el('details', {class: 'job-more', ontoggle: e => {
+        const control = e.currentTarget;
+        control.classList.remove('menu-up');
+        if (control.open && control.querySelector('.job-menu').getBoundingClientRect().bottom > innerHeight - 12) control.classList.add('menu-up');
+      }}, [el('summary', {text: 'More', 'aria-label': `More actions for ${job.title}`})]);
       if (openDetails.has(`${job.id}:job-more`)) more.open = true;
       const menu = el('div', {class: 'job-menu'}); more.append(menu); actions.append(more);
       if (job.status !== 'applied') menu.append(el('button', {type: 'button', class: 'text-button', text: job.manual_eligible === 'no' ? 'Undo not eligible' : 'Mark not eligible', onclick: e => task(e.target, async () => renderJobs(await api('jobs/eligibility', {id: job.id, eligible: job.manual_eligible === 'no' ? null : 'no'})))}));
@@ -775,6 +784,21 @@ function renderBenchmark(data) {
 }
 
 async function init() {
+  document.addEventListener('click', e => {
+    const current = e.target.closest('.job-more');
+    document.querySelectorAll('.job-more[open]').forEach(menu => {
+      if (menu !== current) menu.open = false;
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const menu = document.querySelector('.job-more[open]');
+    if (menu) {
+      menu.open = false;
+      menu.querySelector('summary').focus({preventScroll: true});
+      e.preventDefault();
+    }
+  });
   state = await api('state'); profile = state.profile;
   selected = new Set(profile.projects.map(p => p.id));
   renderProjects(); renderProfile();

@@ -47,9 +47,8 @@
     <button id="back-to-job" class="secondary" type="button">← Back to this job</button>
   </div>
   <div class="page-title">
-    <div class="eyebrow">A LITTLE MORE YOU. A LITTLE MORE RELEVANT.</div>
-    <h1>Make your work<br><em>speak to the role.</em></h1>
-    <p>A focused resume, grounded in what you actually built.</p>
+    <h1>Tailor resume</h1>
+    <p>Match your projects to a job description and build a one-page resume.</p>
   </div>
   <div class="workspace-grid">
     <div>
@@ -92,9 +91,8 @@
 
 <section id="jobs" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">YOUR SHORTLIST, COLLECTED</div>
-    <h1>Roles worth your time,<br><em>in one place.</em></h1>
-    <p>Companies you follow feed this shortlist — Eligible collects relevant jobs posted within seven days. Unapplied jobs move to Old after seven days and are removed by day eight. Applied jobs stay until you delete them.</p>
+    <h1>Jobs</h1>
+    <p>Your shortlist from the companies you follow.</p>
   </div>
   <div class="jobs-switch" role="group" aria-label="Jobs sections">
     <button class="seg-btn active" type="button" data-pane="board" aria-pressed="true">Shortlist</button>
@@ -102,7 +100,8 @@
   </div>
   <div id="jobs-board" class="jobs-pane">
     <article class="panel">
-      <div class="panel-head"><h2>Jobs</h2></div>
+      <div class="panel-head"><h2>Shortlist</h2><span id="jobs-saved-count" class="pill">0 saved jobs</span></div>
+      <p class="hint">Unapplied jobs move to Old after seven days and are removed after eight. Applied jobs stay until you delete them.</p>
       <div class="jobs-toolbar">
         <div class="jobs-toolbar-actions">
           <button id="jobs-refresh" class="primary" type="button">Refresh all ↻</button>
@@ -132,23 +131,23 @@
         <input id="jobs-search" type="search" placeholder="Search title, company or location">
       </div>
       <details class="jobs-drawer jobs-section" id="jobs-current" open>
-        <summary><span id="jobs-current-label">Eligible</span><span id="jobs-count" class="pill">0 SAVED JOBS</span></summary>
+        <summary><span id="jobs-current-label">Eligible</span><span id="jobs-count" class="pill">0</span></summary>
         <div id="jobs-list"></div>
       </details>
       <details class="jobs-drawer" id="jobs-review">
-        <summary>Needs review <span id="jobs-review-count" class="pill">0</span></summary>
+        <summary><span>Needs review</span><span id="jobs-review-count" class="pill">0</span></summary>
         <p class="hint">Missing or uncertain dates, pending checks, and uncertain matches. These do not appear in Eligible.</p>
         <button class="text-button" type="button" data-delete-jobs="review">Delete all needing review</button>
         <div id="jobs-review-list"></div>
       </details>
       <details class="jobs-drawer" id="jobs-notrel">
-        <summary>Not relevant <span id="jobs-notrel-count" class="pill">0</span></summary>
+        <summary><span>Not relevant</span><span id="jobs-notrel-count" class="pill">0</span></summary>
         <p class="hint">Roles the AI judged outside your software-career scope. Kept for audit instead of deleted.</p>
         <button class="text-button" type="button" data-delete-jobs="notrel">Delete all not-relevant jobs</button>
         <div id="jobs-notrel-list"></div>
       </details>
       <details class="jobs-drawer" id="jobs-old">
-        <summary>Old <span id="jobs-old-count" class="pill">0</span></summary>
+        <summary><span>Old</span><span id="jobs-old-count" class="pill">0</span></summary>
         <p class="hint">Unapplied jobs more than seven days old. Removed automatically once posting age exceeds eight days, when you next open or refresh.</p>
         <button class="text-button" type="button" data-delete-jobs="old">Delete all old jobs</button>
         <div id="jobs-old-list"></div>
@@ -190,9 +189,8 @@
 
 <section id="profile" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">THE SOURCE OF TRUTH</div>
-    <h1>Your experience,<br><em>in your words.</em></h1>
-    <p>Edit once. Reuse for every opportunity.</p>
+    <h1>My profile</h1>
+    <p>Edit your experience once and reuse it for every opportunity.</p>
   </div>
   <form id="profile-form">
     <div id="profile-fields"></div>
@@ -205,9 +203,8 @@
 
 <section id="insights" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">WHAT THE ROLES ASK FOR</div>
-    <h1>See the gaps,<br><em>close them your way.</em></h1>
-    <p>Built from every job description you tailor a resume for.</p>
+    <h1>Insights</h1>
+    <p>Skills requested by the jobs you tailor for.</p>
   </div>
   <article class="panel">
     <div class="panel-head"><span class="step">01</span><h2>Skills you are missing</h2><span class="pill">TOP 10</span></div>
@@ -227,9 +224,8 @@
 
 <section id="testlab" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">VERIFY CHANGES CHEAPLY</div>
-    <h1>The<br><em>test lab.</em></h1>
-    <p>Run a scaled-down collection on a scratch database: your saved jobs, verdicts and Applied marks in Jobs are never touched. Each run starts empty, then 20 direct-feed companies and 10 career-page companies are collected and AI-judged.</p>
+    <h1>Test lab</h1>
+    <p>Try a smaller refresh in a scratch collection. Your saved jobs stay untouched.</p>
   </div>
   <article class="panel">
     <div class="panel-head">
@@ -243,9 +239,8 @@
 
 <section id="benchmarks" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">MEASURE THE REAL WORK</div>
-    <h1>Where the<br><em>time goes.</em></h1>
-    <p>Refresh jobs or review saved jobs to record a live timing report. Reports stay on this computer and contain counters and company names, never job descriptions, prompts or API keys.</p>
+    <h1>Benchmarks</h1>
+    <p>Local timing reports for job collection and review.</p>
   </div>
   <article class="panel">
     <div class="panel-head">
@@ -268,9 +263,8 @@
 
 <section id="usage" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">YOUR AI ACTIVITY</div>
-    <h1>Every token,<br><em>accounted for.</em></h1>
-    <p>Local totals for resume tailoring and job filtering. Tracking starts with this update; earlier activity cannot be recovered.</p>
+    <h1>Usage</h1>
+    <p>AI activity and estimated costs on this computer.</p>
   </div>
   <article class="panel">
     <div class="panel-head">
@@ -301,9 +295,8 @@
 
 <section id="settings" class="view" hidden>
   <div class="page-title">
-    <div class="eyebrow">MAKE YOURSELF AT HOME</div>
-    <h1>A workspace<br><em>that fits you.</em></h1>
-    <p>AI providers, where your resume is saved, and how it is tailored.</p>
+    <h1>Settings</h1>
+    <p>Manage AI providers, resume output, and tailoring preferences.</p>
   </div>
   <div class="settings-grid">
     <article class="panel settings-panel api-panel" id="api-panel">
