@@ -1160,6 +1160,47 @@ details[open] > summary::before {
 .jobs-category-tools .jobs-tabs {
   margin-bottom: 0;
 }
+.jobs-list-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.jobs-sort {
+  position: relative;
+  display: inline-flex;
+  margin: 0;
+  letter-spacing: 0;
+}
+.jobs-sort::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-2);
+  border-bottom: 1.5px solid var(--ink-2);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.jobs-sort select {
+  appearance: none;
+  width: auto;
+  margin: 0;
+  padding: 6px 34px 6px 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 600;
+  cursor: pointer;
+}
+.jobs-sort select:hover {
+  border-color: var(--ink-2);
+  color: var(--ink);
+}
 .job-row, .source-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

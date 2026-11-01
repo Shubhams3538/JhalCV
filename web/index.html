@@ -123,7 +123,15 @@
       </div>
       <div class="jobs-category-tools">
         <div id="jobs-tabs" class="jobs-tabs" role="tablist"></div>
-        <button class="text-button" type="button" data-delete-jobs="">Delete all in this tab</button>
+        <div class="jobs-list-actions">
+          <label class="jobs-sort" for="jobs-sort"><span class="sr-only">Sort jobs by</span>
+            <select id="jobs-sort">
+              <option value="date" selected>Date · newest first</option>
+              <option value="company">Company · A–Z</option>
+            </select>
+          </label>
+          <button class="text-button" type="button" data-delete-jobs="">Delete all in this tab</button>
+        </div>
       </div>
       <div class="search-box">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>

@@ -485,6 +485,9 @@ function renderJobList() {
   const openDetails = new Set([...document.querySelectorAll('.job-row details[open]')].map(d => `${d.closest('.job-row').dataset.jobId}:${d.className}`));
   for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['notrel', '#jobs-notrel-list'], ['old', '#jobs-old-list']]) {
     const jobs = data.jobs.filter(j => jobInTab(j, group) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
+    // The API supplies newest-first order; stable sorting keeps that order
+    // within each company and never mutates the shared collection.
+    if ($('#jobs-sort').value === 'company') jobs.sort((a, b) => a.company.localeCompare(b.company, undefined, {sensitivity: 'base', numeric: true}));
     const total = data.jobs.filter(j => jobInTab(j, group)).length;
     const count = group === jobsTab ? $('#jobs-count') : $(`#jobs-${group}-count`);
     count.textContent = query ? `${jobs.length} of ${total}` : String(total);
@@ -551,6 +554,7 @@ function returnToTailoredJob() {
   const context = tailoringJob;
   jobsTab = JOB_TABS.some(([id]) => id === context.tab) ? context.tab : 'eligible';
   $('#jobs-search').value = context.search || '';
+  $('#jobs-sort').value = context.sort === 'company' ? 'company' : 'date';
   showView('jobs', true, data => {
     const job = data.jobs.find(j => j.id === context.id);
     if (job && !jobInTab(job, jobsTab)) jobsTab = ['review', 'old'].includes(job.category) ? 'eligible' : job.category;
@@ -574,7 +578,7 @@ function returnToTailoredJob() {
 }
 async function tailorForJob(job) {
   const context = {id: job.id, title: job.title, company: job.company, url: job.url, tab: jobsTab,
-    search: $('#jobs-search').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
+    search: $('#jobs-search').value, sort: $('#jobs-sort').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
     listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open,
     notrelOpen: $('#jobs-notrel').open, oldOpen: $('#jobs-old').open};
   const detail = await api('jobs/detail', {id: job.id});
@@ -909,6 +913,7 @@ async function init() {
     renderJobs(await api('jobs/recheck', {})); notify('Using your profile dates. Rechecking jobs…');
   });
   $('#jobs-search').oninput = () => jobsData && renderJobList();
+  $('#jobs-sort').onchange = () => jobsData && renderJobList();
   $('#companies-search').oninput = () => jobsData && renderJobs(jobsData);
   document.querySelectorAll('[data-delete-jobs]').forEach(button => button.onclick = e => {
     const group = button.dataset.deleteJobs || jobsTab;
