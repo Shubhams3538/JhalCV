@@ -1,4 +1,5 @@
 import json
+import copy
 import tempfile
 import threading
 import unittest
@@ -15,6 +16,73 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebTests(unittest.TestCase):
+    def swap_fixture(self):
+        profile = self.app.store.profile()
+        first = profile['projects'][0]
+        profile['projects'] = [dict(copy.deepcopy(first), id=f'project-{i}', name=f'Project {i}') for i in range(3)]
+        profile['projects'][2]['stack'].append('Rust')
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'rules'})
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        draft = self.request('/api/tailor', {
+            'jd': 'Backend engineer building Python and Rust REST APIs and reliable database services.',
+            'projects': ['project-0', 'project-1']}, headers)
+        return profile, draft, headers
+
+    def test_swap_replaces_one_project_preserves_edits_and_requires_new_preview(self):
+        profile, original, headers = self.swap_fixture()
+        old = copy.deepcopy(self.app.drafts[original['id']])
+        self.app.drafts[original['id']]['preview'] = {'revision': 'old-preview'}
+        edits = [{'bullets': p['bullets'][:]} for p in original['projects']]
+        edits[1]['bullets'][0] = 'Built an API.'
+        # Swapping must remain local even when the normal tailoring mode is AI.
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'auto'})
+        with patch('resume.web.App.tailor_profile', side_effect=AssertionError('No tailoring on swap')), \
+                patch('resume.web.rewrite_projects', side_effect=AssertionError('No rewriting on swap')), \
+                patch('resume.web.llm.credential_scope', side_effect=AssertionError('No credentials on swap')), \
+                patch('resume.llm.ask', side_effect=AssertionError('No AI on swap')):
+            swapped = self.request('/api/drafts/swap', {
+                'id': original['id'], 'project': original['projects'][0]['id'],
+                'replacement': 'project-2', 'projects': edits}, headers)
+        self.assertNotEqual(swapped['id'], original['id'])
+        self.assertEqual([p['id'] for p in swapped['projects']], ['project-2', original['projects'][1]['id']])
+        self.assertEqual(swapped['projects'][1]['bullets'], edits[1]['bullets'])
+        self.assertIn('rust', original['gaps'])
+        self.assertEqual(swapped['gaps'], original['gaps'])
+        count = len(original['projects'][0]['bullets'])
+        self.assertEqual(swapped['projects'][0]['bullets'], [b['text'] for b in profile['projects'][2]['bullets'][:count]])
+        new = self.app.drafts[swapped['id']]
+        for key in ('basics', 'experience', 'education', 'coding_profiles', 'skills'):
+            self.assertEqual(new['source'][key], old['source'][key])
+        self.assertEqual(new['jd'], old['jd'])
+        self.assertNotIn('preview', new)
+        self.assertEqual(self.app.drafts[original['id']]['data'], old['data'])
+        self.assertEqual(self.app.store.profile(), profile)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/export', {'id': swapped['id'], 'revision': 'old-preview'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        restored = self.request('/api/drafts/swap', {
+            'id': swapped['id'], 'project': 'project-2', 'replacement': original['projects'][0]['id'],
+            'projects': [{'bullets': p['bullets']} for p in swapped['projects']]}, headers)
+        self.assertEqual([p['id'] for p in restored['projects']], [p['id'] for p in original['projects']])
+        self.assertIn('rust', restored['gaps'])
+
+    def test_invalid_swaps_leave_draft_unchanged(self):
+        profile, draft, headers = self.swap_fixture()
+        before = copy.deepcopy(self.app.drafts[draft['id']])
+        body = {'id': draft['id'], 'project': draft['projects'][0]['id'], 'replacement': 'project-2',
+                'projects': [{'bullets': p['bullets'][:]} for p in draft['projects']]}
+        long_edits = copy.deepcopy(body['projects'])
+        long_edits[1]['bullets'][0] += ' too long ' * 100
+        for changes in ({'replacement': 'project-1'}, {'replacement': 'unknown'},
+                        {'project': 'missing'}, {'projects': []}, {'projects': long_edits}, {'id': 'expired'}):
+            with self.subTest(changes=list(changes)):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    self.request('/api/drafts/swap', {**body, **changes}, headers)
+                self.assertEqual(error.exception.code, 400)
+                self.assertEqual(self.app.drafts[draft['id']], before)
+        self.assertEqual(self.app.store.profile(), profile)
+
     def test_tailored_draft_survives_cli_failover_during_job_search(self):
         profile = self.app.store.profile()
         self.app.store.save_profile(profile)

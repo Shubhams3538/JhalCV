@@ -362,7 +362,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
         order = {b["id"]: i for i, b in enumerate(proj["bullets"])}
         ids.sort(key=lambda b: order[b])
 
-        entry_out = {"name": proj["name"], "stack": proj.get("stack", []),
+        entry_out = {"_project_id": proj["id"], "name": proj["name"], "stack": proj.get("stack", []),
                      "bullets": [owned[b]["text"] for b in ids],
                      "_bullet_meta": [{"id": b, "score": _score_bullet(owned[b], analysis)} for b in ids]}
         if "link" in proj:
@@ -379,7 +379,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
             scored = sorted(proj["bullets"], key=lambda b: -_score_bullet(b, analysis))
             ids = {b["id"] for b in scored[:bullets_per_project]}
             kept = [b for b in proj["bullets"] if b["id"] in ids]
-            entry_out = {"name": proj["name"], "stack": proj.get("stack", []),
+            entry_out = {"_project_id": proj["id"], "name": proj["name"], "stack": proj.get("stack", []),
                          "bullets": [b["text"] for b in kept],
                          "_bullet_meta": [{"id": b["id"], "score": _score_bullet(b, analysis)} for b in kept]}
             if "link" in proj:

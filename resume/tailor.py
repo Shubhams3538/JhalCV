@@ -270,6 +270,7 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
         order = {b["id"]: i for i, b in enumerate(p["bullets"])}
         chosen.sort(key=lambda b: order[b["id"]])
         entry = {
+            "_project_id": p["id"],
             "name": p["name"], "stack": p.get("stack", []),
             "bullets": [b["text"] for b in chosen],
             "_bullet_meta": [{"id": b["id"], "score": b["_score"]} for b in chosen],

@@ -960,6 +960,22 @@ function renderDraft() {
   wrap.append(el('div', {class: 'report', text: draft.notice}));
   draft.projects.forEach((p, pi) => {
     const card = el('article', {class: 'panel draft-project'}, [el('h3', {text: p.name}), el('p', {class: 'hint', text: 'Keep each bullet within its original character and word budget.'})]);
+    const alternatives = (draft.library || []).filter(candidate => !draft.projects.some(chosen => chosen.id === candidate.id));
+    if (alternatives.length) {
+      const picker = el('select', {'aria-label': 'Replacement for ' + p.name}, [
+        el('option', {value: '', text: 'Choose another project…'}),
+        ...alternatives.map(candidate => el('option', {value: candidate.id, text: candidate.name}))]);
+      const swap = el('button', {type: 'button', class: 'secondary', text: 'Swap project', disabled: true,
+        onclick: e => task(e.target, async () => {
+          const updated = await api('drafts/swap', {id: draft.id, project: p.id, replacement: picker.value,
+            projects: draft.projects.map(project => ({bullets: project.bullets}))});
+          draft = updated;
+          renderDraft();
+          notify('Project swapped. Review the wording and build a new PDF preview.');
+        })});
+      picker.onchange = () => {swap.disabled = !picker.value;};
+      card.append(el('div', {class: 'draft-swap'}, [el('div', {class: 'draft-swap-picker'}, [picker]), swap]));
+    }
     p.bullets.forEach((b, bi) => {
       const input = field('Bullet ' + (bi+1), b, v => {draft.projects[pi].bullets[bi] = v;}, {area: true});
       // Draft edits must not call the profile-change invalidation handler.
