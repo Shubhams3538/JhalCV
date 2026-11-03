@@ -257,11 +257,16 @@ class App:
             raise ValueError('Save your own profile before creating a resume.')
         profile = self.store.profile()
         library = copy.deepcopy(profile)
-        chosen = body.get('projects')
-        available = {p['id'] for p in profile['projects']}
-        if not isinstance(chosen, list) or not chosen or any(not isinstance(x, str) or x not in available for x in chosen):
-            raise ValueError('Choose at least one project from your library.')
-        profile['projects'] = [p for p in profile['projects'] if p['id'] in chosen]
+        # The browser uses the full library. Explicit subsets remain supported
+        # for existing scripts, but are no longer a required UI step.
+        if 'projects' in body:
+            chosen = body['projects']
+            available = {p['id'] for p in profile['projects']}
+            if not isinstance(chosen, list) or not chosen or any(not isinstance(x, str) or x not in available for x in chosen):
+                raise ValueError('Choose at least one project from your library.')
+            profile['projects'] = [p for p in profile['projects'] if p['id'] in chosen]
+        if not renderable(profile)['projects']:
+            raise ValueError('Add a project with at least two confirmed, shipped bullets before creating a draft.')
         settings = self.store.settings()
         data, report = self.tailor_profile(profile, jd, settings)
         rewritten, notice = rewrite_projects(data, jd, settings)

@@ -16,6 +16,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebTests(unittest.TestCase):
+    def test_tailor_automatically_considers_full_library_without_project_selection(self):
+        profile, _, headers = self.swap_fixture()
+        for mode in ('rules', 'auto'):
+            self.app.store.save_settings({**self.app.store.settings(), 'tailorer': mode})
+            with self.subTest(mode=mode), \
+                    patch.object(self.app, 'tailor_profile', wraps=self.app.tailor_profile) as tailoring, \
+                    patch('resume.llm.have_key', return_value=False):
+                result = self.request('/api/tailor', {
+                    'jd': 'Backend engineer building Python and Rust REST APIs and reliable database services.'}, headers)
+                self.assertEqual([p['id'] for p in tailoring.call_args.args[0]['projects']],
+                                 [p['id'] for p in profile['projects']])
+                self.assertEqual(len(result['projects']), 2)
+                self.assertEqual(len(result['library']), 3)
+                self.assertEqual(self.app.store.profile(), profile)
+
+    def test_automatic_tailoring_without_projects_has_actionable_error(self):
+        profile = self.app.store.profile()
+        profile['projects'] = []
+        self.app.store.save_profile(profile)
+        with self.assertRaisesRegex(ValueError, 'Add a project'):
+            self.app.post('/api/tailor', {'jd': 'Backend engineer building reliable Python services and REST APIs.'})
+
     def swap_fixture(self):
         profile = self.app.store.profile()
         first = profile['projects'][0]

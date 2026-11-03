@@ -24,7 +24,7 @@ const el = (tag, props = {}, children = []) => {
   for (const child of children) node.append(child);
   return node;
 };
-let state, profile, selected = new Set(), draft = null, imported = null, busy = false;
+let state, profile, draft = null, imported = null, busy = false;
 let noticeTimer, viewRevision = 0;
 function notify(message, error = false) {
   clearTimeout(noticeTimer);
@@ -255,9 +255,7 @@ function renderProjects() {
   $('#project-count').textContent = profile.projects.length + ' PROJECTS';
   const list = $('#project-list'); list.replaceChildren();
   profile.projects.forEach(p => {
-    const check = el('input', {type: 'checkbox', checked: selected.has(p.id), 'aria-label': 'Consider ' + p.name,
-      onclick: e => e.stopPropagation(), onchange: e => {e.target.checked ? selected.add(p.id) : selected.delete(p.id); invalidate();}});
-    const summary = el('summary', {}, [check, el('span', {class: 'project-icon', text: (p.name || '?').trim().charAt(0).toUpperCase() || '?'}),
+    const summary = el('summary', {}, [el('span', {class: 'project-icon', text: (p.name || '?').trim().charAt(0).toUpperCase() || '?'}),
       el('span', {class: 'project-info'}, [el('strong', {text: p.name}), el('small', {text: (p.stack || []).join(' · ')})]), el('span', {text: '▾'})]);
     const card = el('details', {class: 'project-card'}, [summary, projectEditor(p)]);
     card.append(el('p', {class: 'hint', text: 'Choose the focus areas that describe the actual project. Saved edits stay available for future jobs.'}));
@@ -265,7 +263,7 @@ function renderProjects() {
     card.append(el('button', {class: 'danger', text: 'Remove project', onclick: e => task(e.target, async () => {
       state.profile_revision = (await api('projects/remove', {id: p.id, revision: state.profile_revision})).revision;
       profile.projects = profile.projects.filter(x => x.id !== p.id);
-      selected.delete(p.id); invalidate(); renderProjects();
+      invalidate(); renderProjects();
       notify('Project removed from your saved library.');
     })}));
     list.append(card);
@@ -588,7 +586,7 @@ async function tailorForJob(job) {
   if (job.status === 'new') renderJobs(await api('jobs/status', {id: job.id, status: 'seen'}));
   tailoringJob = context; saveTailoringJob();
   showView('workspace'); window.scrollTo(0, 0);
-  notify('Job description added. Choose your projects, then create the tailored draft.');
+  await createDraft();
 }
 function insightBar(item) {
   const fill = el('span'); fill.style.width = item.percent + '%';
@@ -804,7 +802,6 @@ async function init() {
     }
   });
   state = await api('state'); profile = state.profile;
-  selected = new Set(profile.projects.map(p => p.id));
   renderProjects(); renderProfile();
   const s = state.settings;
   $('#output-dir').value = s.output_dir; $('#filename').value = s.filename;
@@ -861,7 +858,7 @@ async function init() {
   });};
   $('#manual-project').onclick = () => {
     const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
-    selected.add(id); invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
+    invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
   };
   $('#import-project').onclick = e => task(e.target, importProject);
   $('#tailor').onclick = e => task(e.target, createDraft);
@@ -942,7 +939,7 @@ async function importProject() {
     if (!imported.project.link?.url) throw new Error('Keep the GitHub source URL when confirming an import.');
     if (profile.projects.some(p => p.link?.url === imported.project.link.url)) throw new Error('This repository is already in your library. Edit its existing entry instead.');
     const next = structuredClone(profile); next.projects.push(imported.project);
-    await storeProfile(next); profile = next; selected.add(imported.project.id); imported = null;
+    await storeProfile(next); profile = next; imported = null;
     wrap.hidden = true; $('#github-url').value = ''; invalidate(); renderProjects(); notify('Project added and saved.');
   })}), el('button', {class: 'text-button', text: 'Discard import', onclick: () => {imported = null; wrap.hidden = true;}}));
 }
@@ -950,7 +947,7 @@ async function createDraft() {
   if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
   if ($('#jd').value.trim().length < 40) throw new Error('Paste a job description of at least 40 characters.');
   await saveProfile();
-  draft = await api('tailor', {jd: $('#jd').value, projects: [...selected]});
+  draft = await api('tailor', {jd: $('#jd').value});
   renderDraft();
   notify('Draft ready. Review the project wording, then preview your PDF.');
 }
