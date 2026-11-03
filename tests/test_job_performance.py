@@ -7,9 +7,14 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from resume.jobs import sources, agents
+from resume.jobs import sources, agents, eligibility
 from resume.jobs.fetch import FetchError, fetch_budget, remaining
 from resume.jobs.service import JobService
+
+
+
+# Never reach a real Z.AI/ZCode route from the suite (a live bridge would
+# spend subscription tokens and make results depend on the outside world).
 
 
 def job(ident, posted=None):
@@ -18,6 +23,36 @@ def job(ident, posted=None):
 
 
 class PerformanceTests(unittest.TestCase):
+    def test_review_has_full_cli_timeout_and_retries_then_provider_fallback(self):
+        calls = []
+        answer = {'results': [{'id': '1', 'min_years': 1, 'eligible': 'yes',
+                              'reason': 'One year required.', 'relevant': 'yes',
+                              'relevance_reason': 'Software role.', 'posted_date': None}]}
+
+        def codex(prompt, schema, folder):
+            calls.append('codex')
+            self.assertEqual(remaining(agents.TIMEOUT), agents.TIMEOUT)
+            raise agents.AgentError('timed out')
+
+        def claude(prompt, schema, folder):
+            calls.append('claude')
+            self.assertEqual(remaining(agents.TIMEOUT), agents.TIMEOUT)
+            return answer
+
+        with patch('resume.jobs.agents.shutil.which', return_value='/bin/fake'), \
+                patch('resume.jobs.agents.RETRY_BACKOFF', 0), \
+                patch.dict(agents.RUNNERS, {'codex': codex, 'claude': claude}):
+            ai = agents.Agents()
+            # Even an expired portal deadline must not poison saved-text review.
+            with fetch_budget(time.monotonic() - 1):
+                result = eligibility.check([{'id': 1, 'title': 'SWE',
+                                             'requirements': '1 year experience'}], 1.5, ai)
+                with self.assertRaises(FetchError):
+                    remaining()
+        self.assertEqual(calls, ['codex'] * agents.AGENT_ATTEMPTS + ['claude'])
+        self.assertEqual((result[1]['by'], result[1]['eligible'], result[1]['relevant']),
+                         ('claude', 'yes', 'yes'))
+
     def test_company_fetches_overlap_and_are_bounded(self):
         with tempfile.TemporaryDirectory() as root:
             service = JobService(root)
@@ -61,7 +96,7 @@ class PerformanceTests(unittest.TestCase):
         self.assertGreater(peak,1)
         self.assertLessEqual(peak,4)
 
-    def test_today_jobs_win_over_older_fast_source(self):
+    def test_each_finished_company_is_judged_immediately_even_under_a_budget(self):
         with tempfile.TemporaryDirectory() as root:
             service=JobService(root)
             service.add_source('A Fast','https://job-boards.greenhouse.io/fast')
@@ -74,8 +109,10 @@ class PerformanceTests(unittest.TestCase):
             with patch.dict(sources.READERS,{'greenhouse':read}), patch('resume.jobs.agents.shutil.which',return_value=None), patch('resume.jobs.service.MAX_CHECKS',1):
                 service.refresh({'experience':[]},lambda _:None)
             saved={j['url']:j for j in service.store.jobs()}
-            self.assertIsNotNone(saved['https://x.test/new']['eligible'])
-            self.assertIsNone(saved['https://x.test/old']['eligible'])
+            # The first company to finish has its job judged right away; the
+            # small budget then leaves the still-fetching company for the run's end.
+            self.assertIsNotNone(saved['https://x.test/old']['eligible'])
+            self.assertIsNone(saved['https://x.test/new']['eligible'])
 
     def test_unchanged_agent_answers_persist_and_changed_prompts_miss(self):
         with tempfile.TemporaryDirectory() as root:

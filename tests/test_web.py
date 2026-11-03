@@ -1,4 +1,5 @@
 import json
+import copy
 import tempfile
 import threading
 import unittest
@@ -7,6 +8,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from contextlib import nullcontext
 
 from resume.web import App, handler
 
@@ -14,6 +16,116 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebTests(unittest.TestCase):
+    def test_tailor_automatically_considers_full_library_without_project_selection(self):
+        profile, _, headers = self.swap_fixture()
+        for mode in ('rules', 'auto'):
+            self.app.store.save_settings({**self.app.store.settings(), 'tailorer': mode})
+            with self.subTest(mode=mode), \
+                    patch.object(self.app, 'tailor_profile', wraps=self.app.tailor_profile) as tailoring, \
+                    patch('resume.llm.have_key', return_value=False):
+                result = self.request('/api/tailor', {
+                    'jd': 'Backend engineer building Python and Rust REST APIs and reliable database services.'}, headers)
+                self.assertEqual([p['id'] for p in tailoring.call_args.args[0]['projects']],
+                                 [p['id'] for p in profile['projects']])
+                self.assertEqual(len(result['projects']), 2)
+                self.assertEqual(len(result['library']), 3)
+                self.assertEqual(self.app.store.profile(), profile)
+
+    def test_automatic_tailoring_without_projects_has_actionable_error(self):
+        profile = self.app.store.profile()
+        profile['projects'] = []
+        self.app.store.save_profile(profile)
+        with self.assertRaisesRegex(ValueError, 'Add a project'):
+            self.app.post('/api/tailor', {'jd': 'Backend engineer building reliable Python services and REST APIs.'})
+
+    def swap_fixture(self):
+        profile = self.app.store.profile()
+        first = profile['projects'][0]
+        profile['projects'] = [dict(copy.deepcopy(first), id=f'project-{i}', name=f'Project {i}') for i in range(3)]
+        profile['projects'][2]['stack'].append('Rust')
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'rules'})
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        draft = self.request('/api/tailor', {
+            'jd': 'Backend engineer building Python and Rust REST APIs and reliable database services.',
+            'projects': ['project-0', 'project-1']}, headers)
+        return profile, draft, headers
+
+    def test_swap_replaces_one_project_preserves_edits_and_requires_new_preview(self):
+        profile, original, headers = self.swap_fixture()
+        old = copy.deepcopy(self.app.drafts[original['id']])
+        self.app.drafts[original['id']]['preview'] = {'revision': 'old-preview'}
+        edits = [{'bullets': p['bullets'][:]} for p in original['projects']]
+        edits[1]['bullets'][0] = 'Built an API.'
+        # Swapping must remain local even when the normal tailoring mode is AI.
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'auto'})
+        with patch('resume.web.App.tailor_profile', side_effect=AssertionError('No tailoring on swap')), \
+                patch('resume.web.rewrite_projects', side_effect=AssertionError('No rewriting on swap')), \
+                patch('resume.web.llm.credential_scope', side_effect=AssertionError('No credentials on swap')), \
+                patch('resume.llm.ask', side_effect=AssertionError('No AI on swap')):
+            swapped = self.request('/api/drafts/swap', {
+                'id': original['id'], 'project': original['projects'][0]['id'],
+                'replacement': 'project-2', 'projects': edits}, headers)
+        self.assertNotEqual(swapped['id'], original['id'])
+        self.assertEqual([p['id'] for p in swapped['projects']], ['project-2', original['projects'][1]['id']])
+        self.assertEqual(swapped['projects'][1]['bullets'], edits[1]['bullets'])
+        self.assertIn('rust', original['gaps'])
+        self.assertEqual(swapped['gaps'], original['gaps'])
+        count = len(original['projects'][0]['bullets'])
+        self.assertEqual(swapped['projects'][0]['bullets'], [b['text'] for b in profile['projects'][2]['bullets'][:count]])
+        new = self.app.drafts[swapped['id']]
+        for key in ('basics', 'experience', 'education', 'coding_profiles', 'skills'):
+            self.assertEqual(new['source'][key], old['source'][key])
+        self.assertEqual(new['jd'], old['jd'])
+        self.assertNotIn('preview', new)
+        self.assertEqual(self.app.drafts[original['id']]['data'], old['data'])
+        self.assertEqual(self.app.store.profile(), profile)
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/export', {'id': swapped['id'], 'revision': 'old-preview'}, headers)
+        self.assertEqual(error.exception.code, 400)
+        restored = self.request('/api/drafts/swap', {
+            'id': swapped['id'], 'project': 'project-2', 'replacement': original['projects'][0]['id'],
+            'projects': [{'bullets': p['bullets']} for p in swapped['projects']]}, headers)
+        self.assertEqual([p['id'] for p in restored['projects']], [p['id'] for p in original['projects']])
+        self.assertIn('rust', restored['gaps'])
+
+    def test_invalid_swaps_leave_draft_unchanged(self):
+        profile, draft, headers = self.swap_fixture()
+        before = copy.deepcopy(self.app.drafts[draft['id']])
+        body = {'id': draft['id'], 'project': draft['projects'][0]['id'], 'replacement': 'project-2',
+                'projects': [{'bullets': p['bullets'][:]} for p in draft['projects']]}
+        long_edits = copy.deepcopy(body['projects'])
+        long_edits[1]['bullets'][0] += ' too long ' * 100
+        for changes in ({'replacement': 'project-1'}, {'replacement': 'unknown'},
+                        {'project': 'missing'}, {'projects': []}, {'projects': long_edits}, {'id': 'expired'}):
+            with self.subTest(changes=list(changes)):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    self.request('/api/drafts/swap', {**body, **changes}, headers)
+                self.assertEqual(error.exception.code, 400)
+                self.assertEqual(self.app.drafts[draft['id']], before)
+        self.assertEqual(self.app.store.profile(), profile)
+
+    def test_tailored_draft_survives_cli_failover_during_job_search(self):
+        profile = self.app.store.profile()
+        self.app.store.save_profile(profile)
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'rules'})
+        self.app.jobs.progress['running'] = True
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        for provider, name in [('claude', 'Claude Code'), ('codex', 'Codex'), ('openai', 'OpenAI')]:
+            with self.subTest(provider=provider):
+                session = {'events': [{'provider': 'openai', 'status': 'failed'}],
+                           'used': [{'provider': provider, 'model': 'test'}], 'last_call_failed': False}
+                with patch('resume.web.llm.credential_scope', return_value=nullcontext(session)), \
+                        patch('resume.web.rewrite_projects', side_effect=lambda data, jd, settings: (data, '')):
+                    result = self.request('/api/tailor', {
+                        'jd': 'Backend engineer building Python REST APIs and reliable database services.',
+                        'projects': [profile['projects'][0]['id']]}, headers)
+                self.assertIn(name, result['notice'])
+                self.assertTrue(result['projects'])
+                self.assertEqual(self.app.drafts[result['id']]['report']['providers_used'], session['used'])
+        self.assertEqual(self.app.store.profile(), profile)
+        self.assertTrue(self.app.jobs.progress['running'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -36,6 +148,13 @@ class WebTests(unittest.TestCase):
             headers=headers or {})
         with urllib.request.urlopen(req) as response:
             return json.load(response)
+
+    def test_progress_endpoint_returns_run_state_without_the_collection(self):
+        self.app.jobs.progress.update(running=True, message='5/9 companies completed')
+        light = self.request('/api/jobs/progress')
+        self.assertEqual(light['progress']['message'], '5/9 companies completed')
+        self.assertNotIn('jobs', light)
+        self.assertNotIn('sources', light)
 
     def test_usage_persistence_and_authenticated_reference_setting(self):
         usage = self.request('/api/usage')

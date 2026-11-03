@@ -24,7 +24,7 @@ const el = (tag, props = {}, children = []) => {
   for (const child of children) node.append(child);
   return node;
 };
-let state, profile, selected = new Set(), draft = null, imported = null, busy = false;
+let state, profile, draft = null, imported = null, busy = false;
 let noticeTimer, viewRevision = 0;
 function notify(message, error = false) {
   clearTimeout(noticeTimer);
@@ -72,7 +72,8 @@ function updateActivity(progress) {
     el('div', {class: 'activity-head'}, [
       el('span', {class: 'activity-dot'}),
       el('span', {class: 'activity-title',
-        text: progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
+        text: progress.test ? 'Test refresh (scratch database)'
+          : progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
       el('button', {class: 'activity-close', type: 'button', title: 'Hide for this task', text: '✕',
         onclick: e => { e.stopPropagation(); activityDismissed = true; card.hidden = true; }})
     ])];
@@ -93,12 +94,71 @@ function scheduleActivity(delay) {
   activityTimer = setTimeout(pollActivity, delay);
 }
 
+let testLabPoll = null;
+const TEST_CATEGORY_LABELS = {eligible: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'],
+  notrel: ['NOT RELEVANT', 'missing'], review: ['NEEDS REVIEW', ''], old: ['OLD', ''], applied: ['APPLIED', '']};
+
+function renderTestLab(data) {
+  const wrap = $('#testlab-results');
+  const counts = {};
+  for (const job of data.jobs || []) counts[job.category] = (counts[job.category] || 0) + 1;
+  const parts = Object.entries(counts).map(([key, n]) => `${(TEST_CATEGORY_LABELS[key] || [key])[0]}: ${n}`);
+  wrap.replaceChildren(
+    el('p', {class: 'hint', text: (data.jobs || []).length
+      ? `${data.jobs.length} test job(s) — ` + parts.join(' · ') : 'No test jobs collected yet.'}));
+  if (data.progress?.error) wrap.prepend(el('p', {class: 'error', text: 'Test failed: ' + data.progress.error}));
+  const judges = {};
+  for (const job of data.jobs || []) {
+    const name = job.checked_by || 'Not checked';
+    judges[name] = (judges[name] || 0) + 1;
+  }
+  if (Object.keys(judges).length) wrap.append(el('p', {class: 'hint', text: 'Reviewed by: ' + Object.entries(judges).map(([name, n]) => `${name}: ${n}`).join(' · ') + '. Rules cannot finish the relevance review.'}));
+  const list = el('div', {class: 'testlab-list'});
+  for (const job of (data.jobs || []).slice(0, 300)) {
+    const [label, tone] = TEST_CATEGORY_LABELS[job.category] || [job.category, ''];
+    list.append(el('div', {class: 'testlab-job'}, [
+      el('span', {class: 'pill ' + tone, text: label}),
+      el('strong', {text: job.title}),
+      el('small', {text: job.company + (job.location ? ' · ' + job.location : '')}),
+    ]));
+  }
+  wrap.append(list);
+  wrap.hidden = false;
+}
+
+async function updateTestLab() {
+  const button = $('#testlab-run');
+  if (!button) return;
+  const revision = viewRevision;
+  clearTimeout(testLabPoll);
+  try {
+    const data = await api('jobs/test');
+    if (revision !== viewRevision) return;  // the user moved on to another page
+    button.disabled = Boolean(data.progress && data.progress.running);
+    renderTestLab(data);
+    if (data.progress && data.progress.running) testLabPoll = setTimeout(updateTestLab, 1500);
+  } catch {
+    if (revision === viewRevision) testLabPoll = setTimeout(updateTestLab, 3000);
+  }
+}
+
+let lastActivitySource = null;
+function activityProgress(data) {
+  const main = data.progress, test = data.test_progress;
+  if (main?.running) { lastActivitySource = 'main'; return main; }
+  if (test?.running) { lastActivitySource = 'test'; return test; }
+  if (test?.finished_at && test.finished_at === main?.finished_at && lastActivitySource === 'test') return test;
+  return (test?.finished_at || 0) > (main?.finished_at || 0) ? test : (main || test);
+}
+
 async function pollActivity() {
   if (document.hidden) { scheduleActivity(ACTIVITY_IDLE_MS); return; }
   try {
-    const data = await api('jobs');
-    updateActivity(data.progress);
-    scheduleActivity(data.progress && data.progress.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
+    const data = await api('jobs/progress');
+    // A Test-lab run reports on the scratch service; show whichever is active.
+    const live = activityProgress(data);
+    updateActivity(live);
+    scheduleActivity(live && live.running ? ACTIVITY_ACTIVE_MS : ACTIVITY_IDLE_MS);
   } catch { scheduleActivity(ACTIVITY_IDLE_MS); }
 }
 
@@ -195,9 +255,7 @@ function renderProjects() {
   $('#project-count').textContent = profile.projects.length + ' PROJECTS';
   const list = $('#project-list'); list.replaceChildren();
   profile.projects.forEach(p => {
-    const check = el('input', {type: 'checkbox', checked: selected.has(p.id), 'aria-label': 'Consider ' + p.name,
-      onclick: e => e.stopPropagation(), onchange: e => {e.target.checked ? selected.add(p.id) : selected.delete(p.id); invalidate();}});
-    const summary = el('summary', {}, [check, el('span', {class: 'project-icon', text: (p.name || '?').trim().charAt(0).toUpperCase() || '?'}),
+    const summary = el('summary', {}, [el('span', {class: 'project-icon', text: (p.name || '?').trim().charAt(0).toUpperCase() || '?'}),
       el('span', {class: 'project-info'}, [el('strong', {text: p.name}), el('small', {text: (p.stack || []).join(' · ')})]), el('span', {text: '▾'})]);
     const card = el('details', {class: 'project-card'}, [summary, projectEditor(p)]);
     card.append(el('p', {class: 'hint', text: 'Choose the focus areas that describe the actual project. Saved edits stay available for future jobs.'}));
@@ -205,7 +263,7 @@ function renderProjects() {
     card.append(el('button', {class: 'danger', text: 'Remove project', onclick: e => task(e.target, async () => {
       state.profile_revision = (await api('projects/remove', {id: p.id, revision: state.profile_revision})).revision;
       profile.projects = profile.projects.filter(x => x.id !== p.id);
-      selected.delete(p.id); invalidate(); renderProjects();
+      invalidate(); renderProjects();
       notify('Project removed from your saved library.');
     })}));
     list.append(card);
@@ -275,7 +333,7 @@ async function saveProfile() {
   state.example = false;
   notify('Profile saved on this computer.');
 }
-const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', profile: 'My profile', insights: 'Insights', usage: 'Usage', benchmarks: 'Benchmarks', settings: 'Settings'};
+const VIEW_LABELS = {workspace: 'Tailor resume', jobs: 'Jobs', testlab: 'Test lab', profile: 'My profile', insights: 'Insights', usage: 'Usage', benchmarks: 'Benchmarks', settings: 'Settings'};
 function rememberView(view, replace = false) {
   const hash = '#' + view + (view === 'jobs' ? '/' + jobsTab : '');
   if (location.hash !== hash) history[replace ? 'replaceState' : 'pushState'](null, '', hash);
@@ -296,7 +354,9 @@ function showView(view, remember = true, onJobs = null) {
   $('#breadcrumb').textContent = VIEW_LABELS[view];
   if (view === 'workspace') renderProjects();
   if (view === 'profile') renderProfile();
+  if (view === 'jobs') $('#jobs-current').open = true;
   if (view === 'jobs') api('jobs').then(data => {if (revision === viewRevision) (onJobs || renderJobs)(data);}).catch(e => notify(e.message, true));
+  if (view === 'testlab') updateTestLab();
   if (view === 'benchmarks') loadBenchmark();
   if (view === 'usage') api('usage').then(renderUsage).catch(e => notify(e.message, true));
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
@@ -386,15 +446,6 @@ function renderJobs(data) {
     ? `Using your own value. Your profile dates add up to ${exp.computed} years.`
     : `Calculated from your profile's experience dates (${exp.computed} years). Change it if some roles should not count.`;
   $('#jobs-years-reset').hidden = !exp.custom;
-  const agents = data.agents.length ? data.agents.join(' → ') : 'no agent installed (text rules only)';
-  const active = (data.progress.active || []).join(', ');
-  const progress = data.progress.total != null
-    ? `${data.progress.completed || 0}/${data.progress.total} ${data.progress.phase === 'review' ? 'jobs reviewed' : 'companies completed'}${active ? ' · Active: ' + active : ''}. ${data.progress.message}`
-    : data.progress.message;
-  $('#jobs-progress').textContent = running ? progress
-    : data.progress.error ? 'Last refresh failed: ' + data.progress.error
-    : (data.progress.message ? data.progress.message + ' ' : '') + `Last refresh ${ago(Number(data.last_refresh))}. Relevance and experience: ${agents}.`;
-  $('#jobs-progress').className = data.progress.error && !running ? 'warning' : 'hint';
   $('#jobs-refresh').disabled = running;
   $('#jobs-refresh').textContent = running && data.progress.phase !== 'review' ? 'Refreshing…' : 'Refresh all ↻';
   const pending = data.unreviewed_count ?? data.jobs.filter(j => !j.relevant || !j.eligible).length;
@@ -405,12 +456,17 @@ function renderJobs(data) {
   const tabs = $('#jobs-tabs'); tabs.replaceChildren();
   for (const [id, name] of JOB_TABS) {
     const count = data.jobs.filter(j => jobInTab(j, id)).length;
-    tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab),
-      text: `${name} ${count}`, onclick: () => {jobsTab = id; rememberView('jobs'); renderJobs(jobsData);}}));
+    tabs.append(el('button', {type: 'button', role: 'tab', class: 'job-tab' + (id === jobsTab ? ' active' : ''), 'aria-selected': String(id === jobsTab), 'data-category': id,
+      text: `${name} ${count}`, onclick: () => {jobsTab = id; $('#jobs-current').open = true; rememberView('jobs'); renderJobs(jobsData);}}));
   }
+  $('#jobs-current').dataset.category = jobsTab;
+  $('#jobs-saved-count').textContent = `${data.jobs.length} saved jobs`;
+  $('#jobs-current-label').textContent = JOB_TABS.find(([id]) => id === jobsTab)?.[1] || 'Eligible';
   $('#jobs-review-count').textContent = data.jobs.filter(j => jobInTab(j, 'review')).length;
+  $('#jobs-notrel-count').textContent = data.jobs.filter(j => jobInTab(j, 'notrel')).length;
   $('#jobs-old-count').textContent = data.jobs.filter(j => jobInTab(j, 'old')).length;
   $('#jobs-review').hidden = jobsTab !== 'eligible';
+  $('#jobs-notrel').hidden = jobsTab !== 'eligible';
   $('#jobs-old').hidden = jobsTab !== 'eligible';
   renderJobList();
   updateActivity(data.progress);
@@ -425,19 +481,29 @@ function syncRefreshSelected() {
 function renderJobList() {
   const data = jobsData, query = $('#jobs-search').value.trim().toLowerCase();
   const openDetails = new Set([...document.querySelectorAll('.job-row details[open]')].map(d => `${d.closest('.job-row').dataset.jobId}:${d.className}`));
-  for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['old', '#jobs-old-list']]) {
+  for (const [group, selector] of [[jobsTab, '#jobs-list'], ['review', '#jobs-review-list'], ['notrel', '#jobs-notrel-list'], ['old', '#jobs-old-list']]) {
     const jobs = data.jobs.filter(j => jobInTab(j, group) && (!query || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(query)));
-    $('#jobs-count').textContent = data.jobs.length + ' SAVED JOBS';
+    // The API supplies newest-first order; stable sorting keeps that order
+    // within each company and never mutates the shared collection.
+    if ($('#jobs-sort').value === 'company') jobs.sort((a, b) => a.company.localeCompare(b.company, undefined, {sensitivity: 'base', numeric: true}));
+    const total = data.jobs.filter(j => jobInTab(j, group)).length;
+    const count = group === jobsTab ? $('#jobs-count') : $(`#jobs-${group}-count`);
+    count.textContent = query ? `${jobs.length} of ${total}` : String(total);
     const list = $(selector); list.replaceChildren();
     if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
     const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'], unclear: ['UNCLEAR', '']};
     for (const job of jobs) {
       const [label, tone] = job.manual_eligible === 'no' ? ['NOT ELIGIBLE · YOU', 'ineligible'] : job.relevant === 'no' ? ['NOT RELEVANT', 'missing']
+        : job.eligible === 'no' ? ['NOT ELIGIBLE', 'ineligible']
         : !job.relevant ? ['AWAITING REVIEW', ''] : verdicts[job.eligible] || ['CHECKING', ''];
       const setStatus = status => e => task(e.target, async () => renderJobs(await api('jobs/status', {id: job.id, status})));
       const meta = [job.company, job.location, job.freshness === 'unknown' ? 'Posting date unverified' : job.posted && 'posted ' + job.posted, job.active === 0 && 'Not returned in latest refresh'].filter(Boolean).join(' · ');
       const actions = el('div', {class: 'job-actions'}, [el('button', {type: 'button', class: 'secondary', text: 'Tailor resume', onclick: e => task(e.target, () => tailorForJob(job))})]);
-      const more = el('details', {class: 'job-more'}, [el('summary', {text: 'More', 'aria-label': `More actions for ${job.title}`})]);
+      const more = el('details', {class: 'job-more', ontoggle: e => {
+        const control = e.currentTarget;
+        control.classList.remove('menu-up');
+        if (control.open && control.querySelector('.job-menu').getBoundingClientRect().bottom > innerHeight - 12) control.classList.add('menu-up');
+      }}, [el('summary', {text: 'More', 'aria-label': `More actions for ${job.title}`})]);
       if (openDetails.has(`${job.id}:job-more`)) more.open = true;
       const menu = el('div', {class: 'job-menu'}); more.append(menu); actions.append(more);
       if (job.status !== 'applied') menu.append(el('button', {type: 'button', class: 'text-button', text: job.manual_eligible === 'no' ? 'Undo not eligible' : 'Mark not eligible', onclick: e => task(e.target, async () => renderJobs(await api('jobs/eligibility', {id: job.id, eligible: job.manual_eligible === 'no' ? null : 'no'})))}));
@@ -486,13 +552,16 @@ function returnToTailoredJob() {
   const context = tailoringJob;
   jobsTab = JOB_TABS.some(([id]) => id === context.tab) ? context.tab : 'eligible';
   $('#jobs-search').value = context.search || '';
+  $('#jobs-sort').value = context.sort === 'company' ? 'company' : 'date';
   showView('jobs', true, data => {
     const job = data.jobs.find(j => j.id === context.id);
     if (job && !jobInTab(job, jobsTab)) jobsTab = ['review', 'old'].includes(job.category) ? 'eligible' : job.category;
     if (job && !`${job.title} ${job.company} ${job.location}`.toLowerCase().includes($('#jobs-search').value.trim().toLowerCase())) $('#jobs-search').value = '';
     rememberView('jobs', true);
     renderJobs(data);
+    $('#jobs-current').open = (context.listOpen ?? true) || Boolean(job && jobInTab(job, jobsTab));
     $('#jobs-review').open = Boolean(context.reviewOpen || job?.category === 'review');
+    $('#jobs-notrel').open = Boolean(context.notrelOpen || job?.category === 'notrel');
     $('#jobs-old').open = Boolean(context.oldOpen || job?.category === 'old');
     $('#jobs-sources').scrollTop = context.sourceScroll || 0;
     window.scrollTo(0, context.scrollY || 0);
@@ -507,8 +576,9 @@ function returnToTailoredJob() {
 }
 async function tailorForJob(job) {
   const context = {id: job.id, title: job.title, company: job.company, url: job.url, tab: jobsTab,
-    search: $('#jobs-search').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
-    reviewOpen: $('#jobs-review').open, oldOpen: $('#jobs-old').open};
+    search: $('#jobs-search').value, sort: $('#jobs-sort').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
+    listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open,
+    notrelOpen: $('#jobs-notrel').open, oldOpen: $('#jobs-old').open};
   const detail = await api('jobs/detail', {id: job.id});
   if (!detail.description.trim()) throw new Error('This job has no description saved yet. Refresh, or open the job and paste its description.');
   $('#jd').value = `${detail.title} at ${detail.company}${detail.location ? ' (' + detail.location + ')' : ''}\n\n${detail.description}`.slice(0, 30000);
@@ -516,7 +586,7 @@ async function tailorForJob(job) {
   if (job.status === 'new') renderJobs(await api('jobs/status', {id: job.id, status: 'seen'}));
   tailoringJob = context; saveTailoringJob();
   showView('workspace'); window.scrollTo(0, 0);
-  notify('Job description added. Choose your projects, then create the tailored draft.');
+  await createDraft();
 }
 function insightBar(item) {
   const fill = el('span'); fill.style.width = item.percent + '%';
@@ -703,7 +773,7 @@ function renderBenchmark(data) {
   $('#benchmark-warning').hidden = !data.persistence_warning;
   $('#benchmark-warning').textContent = 'Some timing data could not be saved. Download the current report before restarting.';
   $('#benchmarks-download').disabled = !report;
-  $('#benchmark-status').textContent = report ? `${report.mode === 'review' ? 'Saved-job review' : 'Job refresh'} · ${report.status} · ${report.elapsed_seconds.toFixed(2)} seconds elapsed · Started ${new Date(report.started_at).toLocaleString()}`
+  $('#benchmark-status').textContent = report ? `${report.mode === 'review' ? 'Saved-job review' : report.mode === 'test' ? 'Test lab run' : 'Job refresh'} · ${report.status} · ${report.elapsed_seconds.toFixed(2)} seconds elapsed · Started ${new Date(report.started_at).toLocaleString()}`
     : 'No live report yet. Your next Refresh all, Refresh selected, or Review unreviewed jobs run will be recorded automatically.';
   const table = (headings, rows) => el('table', {}, [el('thead', {}, [el('tr', {}, headings.map(text => el('th', {text})))]), el('tbody', {}, rows.map(row => el('tr', {}, row.map(text => el('td', {text: String(text)}))))) ]);
   const sec = value => Number(value || 0).toFixed(3) + 's';
@@ -716,8 +786,22 @@ function renderBenchmark(data) {
 }
 
 async function init() {
+  document.addEventListener('click', e => {
+    const current = e.target.closest('.job-more');
+    document.querySelectorAll('.job-more[open]').forEach(menu => {
+      if (menu !== current) menu.open = false;
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const menu = document.querySelector('.job-more[open]');
+    if (menu) {
+      menu.open = false;
+      menu.querySelector('summary').focus({preventScroll: true});
+      e.preventDefault();
+    }
+  });
   state = await api('state'); profile = state.profile;
-  selected = new Set(profile.projects.map(p => p.id));
   renderProjects(); renderProfile();
   const s = state.settings;
   $('#output-dir').value = s.output_dir; $('#filename').value = s.filename;
@@ -774,7 +858,7 @@ async function init() {
   });};
   $('#manual-project').onclick = () => {
     const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
-    selected.add(id); invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
+    invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
   };
   $('#import-project').onclick = e => task(e.target, importProject);
   $('#tailor').onclick = e => task(e.target, createDraft);
@@ -805,6 +889,14 @@ async function init() {
   $('#jobs-review-all').onclick = e => task(e.target, async () => renderJobs(await api('jobs/review', {})))
     .finally(() => {if (jobsData) renderJobs(jobsData);});
   $('#jobs-refresh').onclick = e => task(e.target, async () => renderJobs(await api('jobs/refresh', {})));
+  $('#testlab-run').onclick = e => {
+    if (!confirm('Run a 30-company test collection on a scratch database? Your saved jobs in Jobs are not touched.')) return;
+    task(e.target, async () => {
+      await api('jobs/refresh', {test: true});
+      notify('Test refresh started on the scratch database — results appear below.');
+      updateTestLab();
+    });
+  };
   $('#jobs-refresh-selected').onclick = e => task(e.target, async () => {
     renderJobs(await api('jobs/refresh', {sources: [...refreshPick]}));
     syncRefreshSelected();
@@ -818,10 +910,11 @@ async function init() {
     renderJobs(await api('jobs/recheck', {})); notify('Using your profile dates. Rechecking jobs…');
   });
   $('#jobs-search').oninput = () => jobsData && renderJobList();
+  $('#jobs-sort').onchange = () => jobsData && renderJobList();
   $('#companies-search').oninput = () => jobsData && renderJobs(jobsData);
   document.querySelectorAll('[data-delete-jobs]').forEach(button => button.onclick = e => {
     const group = button.dataset.deleteJobs || jobsTab;
-    const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', old: 'Old'};
+    const names = {eligible: 'Eligible', no: 'Not eligible', applied: 'Applied', review: 'Needs review', notrel: 'Not relevant', old: 'Old'};
     const count = jobsData?.jobs.filter(j => jobInTab(j, group)).length || 0;
     if (!count) return;
     if (!confirm(`Delete all ${count} jobs in ${names[group]}? This includes jobs hidden by search. Deleted jobs will not return on refresh.`)) return;
@@ -846,7 +939,7 @@ async function importProject() {
     if (!imported.project.link?.url) throw new Error('Keep the GitHub source URL when confirming an import.');
     if (profile.projects.some(p => p.link?.url === imported.project.link.url)) throw new Error('This repository is already in your library. Edit its existing entry instead.');
     const next = structuredClone(profile); next.projects.push(imported.project);
-    await storeProfile(next); profile = next; selected.add(imported.project.id); imported = null;
+    await storeProfile(next); profile = next; imported = null;
     wrap.hidden = true; $('#github-url').value = ''; invalidate(); renderProjects(); notify('Project added and saved.');
   })}), el('button', {class: 'text-button', text: 'Discard import', onclick: () => {imported = null; wrap.hidden = true;}}));
 }
@@ -854,7 +947,7 @@ async function createDraft() {
   if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
   if ($('#jd').value.trim().length < 40) throw new Error('Paste a job description of at least 40 characters.');
   await saveProfile();
-  draft = await api('tailor', {jd: $('#jd').value, projects: [...selected]});
+  draft = await api('tailor', {jd: $('#jd').value});
   renderDraft();
   notify('Draft ready. Review the project wording, then preview your PDF.');
 }
@@ -864,6 +957,22 @@ function renderDraft() {
   wrap.append(el('div', {class: 'report', text: draft.notice}));
   draft.projects.forEach((p, pi) => {
     const card = el('article', {class: 'panel draft-project'}, [el('h3', {text: p.name}), el('p', {class: 'hint', text: 'Keep each bullet within its original character and word budget.'})]);
+    const alternatives = (draft.library || []).filter(candidate => !draft.projects.some(chosen => chosen.id === candidate.id));
+    if (alternatives.length) {
+      const picker = el('select', {'aria-label': 'Replacement for ' + p.name}, [
+        el('option', {value: '', text: 'Choose another project…'}),
+        ...alternatives.map(candidate => el('option', {value: candidate.id, text: candidate.name}))]);
+      const swap = el('button', {type: 'button', class: 'secondary', text: 'Swap project', disabled: true,
+        onclick: e => task(e.target, async () => {
+          const updated = await api('drafts/swap', {id: draft.id, project: p.id, replacement: picker.value,
+            projects: draft.projects.map(project => ({bullets: project.bullets}))});
+          draft = updated;
+          renderDraft();
+          notify('Project swapped. Review the wording and build a new PDF preview.');
+        })});
+      picker.onchange = () => {swap.disabled = !picker.value;};
+      card.append(el('div', {class: 'draft-swap'}, [el('div', {class: 'draft-swap-picker'}, [picker]), swap]));
+    }
     p.bullets.forEach((b, bi) => {
       const input = field('Bullet ' + (bi+1), b, v => {draft.projects[pi].bullets[bi] = v;}, {area: true});
       // Draft edits must not call the profile-change invalidation handler.

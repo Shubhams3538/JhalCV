@@ -28,6 +28,8 @@
   --warning-ink: #ffc46b;
   --warning-bg: rgba(255, 184, 77, .12);
   --warning-line: rgba(255, 184, 77, .35);
+  --job-old: #8bb8ff;
+  --job-applied: #72d5c8;
   --skeleton: #242424;
   --backdrop: rgba(0, 0, 0, .65);
   --topbar: rgba(18, 18, 18, .75);
@@ -60,6 +62,8 @@
   --warning-ink: #b26a00;
   --warning-bg: rgba(178, 106, 0, .1);
   --warning-line: rgba(178, 106, 0, .35);
+  --job-old: #315fba;
+  --job-applied: #14776b;
   --skeleton: #e8e8e8;
   --backdrop: rgba(0, 0, 0, .5);
   --topbar: rgba(246, 246, 246, .8);
@@ -332,19 +336,14 @@ main {
   to { opacity: 1; transform: none; }
 }
 .page-title {
-  --wash: rgba(30, 217, 96, .15);
-  padding: 32px 20px 30px;
-  margin: -8px -8px 26px;
-  background: linear-gradient(180deg, var(--wash) 0%, transparent 82%);
-  border-radius: 12px;
+  padding: 20px 0;
+  margin: 0 0 4px;
 }
-#workspace .page-title { --wash: rgba(30, 217, 96, .15); }
-#jobs .page-title { --wash: rgba(80, 140, 255, .13); }
-#profile .page-title { --wash: rgba(190, 120, 255, .13); }
-#insights .page-title { --wash: rgba(255, 160, 80, .12); }
-#benchmarks .page-title { --wash: rgba(80, 210, 210, .12); }
-#usage .page-title { --wash: rgba(150, 160, 180, .13); }
-#settings .page-title { --wash: rgba(255, 120, 160, .11); }
+.page-title h1 {
+  font-size: 24px;
+  line-height: 1.3;
+  margin-bottom: 4px;
+}
 .eyebrow {
   font-size: 11px;
   font-weight: 600;
@@ -726,24 +725,61 @@ details[open] > summary::before {
 .project-card summary::before {
   content: none;
 }
+/* Each drawer has the same frame; its heading stays visible within the
+   section while scrolling. Do not clip overflow: that breaks sticky headers. */
 .jobs-drawer {
-  border-top: 1px solid var(--line);
-  margin-top: 18px;
-  padding-top: 6px;
+  --section-color: var(--muted);
+  border: 1px solid var(--field-border);
+  border-left: 4px solid var(--section-color);
+  border-radius: 10px;
+  margin-top: 20px;
+  scroll-margin-top: 76px;
 }
+#jobs-current, .job-tab[data-category="eligible"] { --section-color: var(--success-ink); }
+#jobs-current[data-category="no"], .job-tab[data-category="no"] { --section-color: var(--error-ink); }
+#jobs-current[data-category="applied"], .job-tab[data-category="applied"] { --section-color: var(--job-applied); }
+#jobs-review { --section-color: var(--warning-ink); }
+#jobs-old { --section-color: var(--job-old); }
 .jobs-drawer > summary {
-  color: var(--ink-2);
-  font-weight: 600;
-  font-size: 12px;
-  padding: 12px 0;
-  border-radius: 6px;
-  transition: color .2s;
+  position: sticky;
+  top: 64px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: inset 4px 0 var(--section-color);
+}
+.jobs-drawer > summary::before {
+  color: var(--section-color);
 }
 .jobs-drawer > summary:hover {
-  color: var(--ink);
+  background: var(--surface-3);
+}
+.jobs-drawer[open] > summary {
+  border-bottom: 1px solid var(--field-border);
+  border-radius: 8px 8px 0 0;
+  box-shadow: inset 4px 0 var(--section-color), 0 4px 8px rgba(0, 0, 0, .12);
 }
 .jobs-drawer > summary .pill {
-  margin-left: 8px;
+  margin-left: auto;
+  color: var(--section-color);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.jobs-drawer > div {
+  padding: 0 16px 12px;
+}
+.jobs-drawer > .hint {
+  margin: 14px 16px 0;
+}
+.jobs-drawer > .text-button {
+  margin-left: 16px;
 }
 .job-more > summary, .job-explanation > summary {
   color: var(--muted);
@@ -1043,17 +1079,6 @@ details[open] > summary::before {
 .jobs-toolbar .secondary {
   white-space: nowrap;
 }
-#jobs-progress {
-  display: block;
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-  min-height: 1.2em;
-}
-#jobs-progress.warning {
-  color: var(--warning-ink);
-}
 .filter-options {
   margin: 14px 0 4px;
   border-top: 1px solid var(--line);
@@ -1109,14 +1134,16 @@ details[open] > summary::before {
   color: var(--ink-2);
   transition: color .2s, background .2s, border-color .2s;
 }
+.job-tab[data-category] {
+  color: var(--section-color);
+}
 .job-tab:hover {
-  color: var(--ink);
-  border-color: var(--ink-2);
+  border-color: var(--section-color);
 }
 .job-tab.active {
-  background: var(--ink);
-  color: var(--bg);
-  border-color: var(--ink);
+  background: var(--section-color);
+  color: var(--bg-deep);
+  border-color: var(--section-color);
   font-weight: 700;
 }
 #jobs-search {
@@ -1126,11 +1153,74 @@ details[open] > summary::before {
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  align-items: start;
+  align-items: center;
   flex-wrap: wrap;
+  margin-bottom: 12px;
 }
-.jobs-category-tools > .text-button {
-  padding-top: 6px;
+.jobs-category-tools .jobs-tabs {
+  margin-bottom: 0;
+}
+.jobs-list-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.jobs-sort {
+  position: relative;
+  display: inline-flex;
+  margin: 0;
+  letter-spacing: 0;
+}
+.jobs-sort::after, .draft-swap-picker::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-2);
+  border-bottom: 1.5px solid var(--ink-2);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.jobs-sort select, .draft-swap-picker select {
+  appearance: none;
+  width: auto;
+  margin: 0;
+  padding: 6px 34px 6px 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 600;
+  cursor: pointer;
+}
+.jobs-sort select:hover, .draft-swap-picker select:hover {
+  border-color: var(--ink-2);
+  color: var(--ink);
+}
+.draft-swap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.draft-swap-picker {
+  position: relative;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.draft-swap-picker select {
+  width: 100%;
+  text-overflow: ellipsis;
+}
+.draft-swap > button {
+  flex: none;
+  padding: 6px 14px;
+  line-height: 1.6;
 }
 .job-row, .source-row {
   display: grid;
@@ -1197,10 +1287,27 @@ details[open] > summary::before {
   gap: 8px;
   align-items: flex-start;
 }
+.job-row:has(.job-more[open]) {
+  position: relative;
+  z-index: 2;
+}
 .job-more {
-  min-width: 80px;
+  position: relative;
+  min-width: 64px;
+}
+.job-more > summary::before {
+  content: "\25B8";
+}
+.job-more[open] > summary::before {
+  transform: rotate(90deg);
 }
 .job-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  min-width: 180px;
+  max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1209,6 +1316,17 @@ details[open] > summary::before {
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--shadow-card);
+}
+.job-more[open] > .job-menu {
+  animation: jobMenuIn 120ms ease-out;
+}
+.job-more.menu-up > .job-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+@keyframes jobMenuIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .job-menu button {
   white-space: nowrap;
@@ -1935,8 +2053,11 @@ footer {
     top: 66px;
   }
   .page-title {
-    padding: 24px 14px 20px;
-    margin: -4px -4px 18px;
+    padding: 16px 0;
+    margin: 0 0 4px;
+  }
+  .jobs-drawer > summary {
+    top: 56px;
   }
   h1 {
     font-size: 28px;
@@ -2005,3 +2126,34 @@ footer {
     transition: none !important;
   }
 }
+
+/* ------------------------------------------------------------ test lab */
+.testlab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.testlab-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.testlab-job strong {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.testlab-job small {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.testlab-job .pill { flex: none; }

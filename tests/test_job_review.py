@@ -8,6 +8,11 @@ from resume.jobs.service import JobService
 from resume.jobs import sources
 
 
+
+# Never reach a real Z.AI/ZCode route from the suite (a live bridge would
+# spend subscription tokens and make results depend on the outside world).
+
+
 def job(ident):
     return dict(external_id=str(ident), title='Software Engineer', location='India',
                 url='https://careers.example/job/'+str(ident), posted=date.today().isoformat(),

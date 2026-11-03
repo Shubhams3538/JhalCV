@@ -1,8 +1,14 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from resume.jobs.imports import preview_csv
 from resume.jobs.service import JobService
+
+
+
+# Never reach a real Z.AI/ZCode route from the suite (a live bridge would
+# spend subscription tokens and make results depend on the outside world).
 
 
 class CompanyImportTests(unittest.TestCase):

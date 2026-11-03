@@ -51,14 +51,28 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn(KEY1, json.dumps(session['events']))
         self.assertEqual(session['used'], [{'provider': 'gemini', 'model': 'test-model'}])
 
+    @patch('resume.llm.cli_routes', return_value=[])
     @patch('resume.provider_api.call')
-    def test_all_failed_keys_return_safe_fallback_error(self, call):
+    def test_all_failed_keys_return_safe_fallback_error(self, call, cli):
         call.side_effect = llm.LLMError('Provider echoed ' + KEY1)
         with llm.credential_scope([route()]):
             with self.assertRaises(llm.LLMError) as caught:
                 llm.ask('prompt', SCHEMA, cache=False)
             self.assertFalse(llm.have_key())
         self.assertNotIn(KEY1, str(caught.exception))
+
+    @patch('resume.llm._cli_ask')
+    @patch('resume.llm.cli_routes')
+    @patch('resume.provider_api.call')
+    def test_tailoring_falls_back_to_cli_without_any_api_key(self, call, cli_routes, cli_ask):
+        # No keys configured at all; the codex CLI subscription answers instead.
+        cli_routes.return_value = [{'id': 'cli:codex', 'provider': 'codex', 'model': 'codex-default', 'cli': 'codex'}]
+        cli_ask.return_value = {'ok': True}
+        with llm.credential_scope([]):
+            self.assertTrue(llm.have_key())
+            self.assertEqual(llm.ask('prompt', SCHEMA, cache=False), ({'ok': True}, False))
+        self.assertEqual(cli_ask.call_args.args[0], 'codex')
+        self.assertEqual(llm.ask.__name__, 'ask')  # sanity: patched within scope only
 
     @patch('resume.provider_api.call')
     def test_cache_is_provider_scoped_and_never_stores_keys(self, call):
@@ -74,8 +88,9 @@ class ProviderTests(unittest.TestCase):
                 self.assertNotIn(KEY1, file.read_text())
                 self.assertNotIn(KEY2, file.read_text())
 
+    @patch('resume.llm.cli_routes', return_value=[])
     @patch('resume.provider_api.call')
-    def test_secret_reflected_in_success_response_is_discarded(self, call):
+    def test_secret_reflected_in_success_response_is_discarded(self, call, cli):
         schema = {'type': 'object', 'properties': {'text': {'type': 'string'}}}
         call.return_value = {'text': KEY1}
         with tempfile.TemporaryDirectory() as directory, llm.credential_scope([route()], directory):

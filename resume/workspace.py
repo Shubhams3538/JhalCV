@@ -16,9 +16,8 @@ from .storage import atomic_json
 from .verify import verify
 
 
-def build_preview(draft, edits, root, ident):
-    root = Path(root).resolve()
-    source = copy.deepcopy(draft['source'])
+def edited_projects(source, edits):
+    """Validate reviewed wording against the immutable source bullet budgets."""
     if not isinstance(edits, list) or len(edits) != len(source['projects']):
         raise ValueError('Project list changed. Create a new tailored draft.')
     proposed = copy.deepcopy(source)
@@ -30,6 +29,13 @@ def build_preview(draft, edits, root, ident):
             if not within(revised, original):
                 raise ValueError(f'{old["name"]}, bullet {i+1}: keep within the original character/word budget and do not add numbers.')
         new['bullets'] = [b.strip() for b in bullets]
+    return proposed
+
+
+def build_preview(draft, edits, root, ident):
+    root = Path(root).resolve()
+    source = copy.deepcopy(draft['source'])
+    proposed = edited_projects(source, edits)
     directory = root / '.cache' / 'web' / ident / secrets.token_hex(8)
     directory.mkdir(parents=True, exist_ok=True)
     template = root / 'templates' / 'classic.typ'

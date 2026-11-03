@@ -13,6 +13,11 @@ from resume.jobs import sources
 from resume.jobs import fetch, agents
 
 
+
+# Never reach a real Z.AI/ZCode route from the suite (a live bridge would
+# spend subscription tokens and make results depend on the outside world).
+
+
 class MetricsTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()

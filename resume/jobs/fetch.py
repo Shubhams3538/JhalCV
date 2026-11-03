@@ -36,7 +36,7 @@ class FetchError(ValueError):
 
 
 _DEADLINE = ContextVar('job_fetch_deadline', default=None)
-_BROWSERS = threading.BoundedSemaphore(4)
+_BROWSERS = threading.BoundedSemaphore(6)
 
 
 QUEUE_SECONDS = 600  # longest wait for a shared browser/AI slot
