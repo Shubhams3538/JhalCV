@@ -1,4 +1,4 @@
-"""Refresh every career source, then check experience for jobs not yet checked."""
+"""Fetch career sources while an independent queue reviews ready job text."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,8 @@ import random
 import threading
 import time
 from datetime import date
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl
 
@@ -18,6 +19,7 @@ from .freshness import freshness, newest_first
 from .imports import MAX_ROWS, preview_csv, validate_entry
 from .resolve import resolve
 from .metrics import Benchmarks, measure, timed, company_scope, submit, mark
+from .review_queue import ReviewQueue
 
 TITLE_SCREEN_MIN = 16
 MAX_DETAILS = 40     # detail pages fetched per source per run (new jobs only)
@@ -214,71 +216,97 @@ class JobService:
             say(f'Test mode: {feeds} direct + {pages} page companies chosen at random '
                 f'({before - len(chosen)} skipped): ' + ', '.join(sorted(s['name'] for s in chosen)) + '.')
         if not recheck_only:
-            active = {}
-            completed = checked = 0
             years = self.experience_years(profile)['years']
-            self.progress.update(phase='fetch', total=len(chosen), completed=0, active=[], started_at=int(time.time()))
+            self.progress.update(phase='fetch', total=len(chosen), completed=0, active=[], started_at=int(time.time()),
+                                 review_total=0, review_completed=0, review_active=0, review_queued=0)
             # Direct feeds finish first; slow rendered pages cannot hold up the entire queue.
             chosen.sort(key=lambda src: src['kind'] == 'page')
-            with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
-                    ThreadPoolExecutor(max_workers=SOURCE_WORKERS) as pool:
-                futures = {}
-                def read_source(src, queued_at):
-                    with self._guard:
-                        active[src['id']] = src['name']
-                        self.progress['active'] = list(active.values())
-                    try:
-                        with company_scope(src['id'], src['name']):
-                            mark('source_queue', time.perf_counter()-queued_at)
-                            with measure('source'):
-                                return self._refresh_source(src, agents, detail_pool, say, years)
-                    finally:
-                        with self._guard:
-                            active.pop(src['id'], None)
-                            self.progress['active'] = list(active.values())
-                            self.progress['completed'] += 1
-                for src in chosen:
-                    futures[submit(pool, read_source, src, time.perf_counter())] = src
-                for future in as_completed(futures):
-                    try:
-                        count, added, failure = future.result()
-                    except Exception as e:  # one company must never abort the others
-                        src = futures[future]
-                        self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
-                        count, added, failure = 0, 0, src['name']
-                    found += count
-                    new += added
-                    if failure:
-                        failures.append(failure)
-                    completed = self.progress['completed']
-                    say(f'{completed}/{len(chosen)} companies completed')
-                    # Publish verdicts as each company finishes, while the slow
-                    # ones keep fetching: its jobs are usable immediately.
-                    if checked < MAX_CHECKS:
-                        todo = self.store.unchecked(MAX_CHECKS-checked, {futures[future]['id']})
-                        if todo:
-                            say(f'{completed}/{len(chosen)} companies completed; checking {len(todo)} jobs…')
-                            self.store.set_eligibility(eligibility.check(todo, years, agents))
-                            checked += len(todo)
+            scope = None if (source_ids is None and limits is None) else {s['id'] for s in chosen}
+            counts = {'found': 0, 'new': 0}
+            with ReviewQueue(self.store, years, agents, lambda stats: self._review_progress(stats, say), limit=MAX_CHECKS) as reviews:
+                self._fetch_into_reviews(chosen, agents, years, reviews, say, failures, counts)
+                # Catch saved jobs from failed sources too, without reviewing
+                # already scheduled IDs or uncertain answers twice in this run.
+                if not reviews.full:
+                    reviews.add(self.store.unchecked(None, scope, exclude_ids=reviews.seen))
+                with self._guard:
+                    self.progress.update(phase='review', total=reviews.total, completed=reviews.completed, active=[])
+                reviews.report()
+            found, new, checked = counts['found'], counts['new'], reviews.completed
 
         self.store.prune_old()
-        years = self.experience_years(profile)['years']
-        checked = 0 if recheck_only else checked
-        scope = None if (source_ids is None and limits is None) else {s['id'] for s in chosen}
-        todo = self.store.unchecked(MAX_CHECKS-checked, scope)
-        if todo:
-            say(f'Checking relevance and experience for {len(todo)} job(s)…')
-            self.store.set_eligibility(eligibility.check(todo, years, agents))
         self.store.set_meta('last_refresh', int(time.time()))
         label = '' if (source_ids is None and limits is None) else ', '.join(s['name'] for s in chosen) + ': '
         parts = [] if recheck_only else [f'{label}{found} matching job(s), {new} new']
-        checked += len(todo)
         if checked:
             parts.append(f'{checked} checked by ' + (', '.join(NAMES[a] for a in agents.used) or 'text rules'))
         if failures:
             parts.append('could not read: ' + ', '.join(failures))
         text = '. '.join(parts)
         return text[:1].upper() + text[1:] + '.' if parts else 'Nothing to check.'
+
+    def _fetch_into_reviews(self, chosen, agents, years, reviews, say, failures, counts):
+        active = {}
+        with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
+                ThreadPoolExecutor(max_workers=SOURCE_WORKERS) as pool:
+            futures = {}
+            def read_source(src, queued_at):
+                with self._guard:
+                    active[src['id']] = src['name']
+                    self.progress['active'] = list(active.values())
+                try:
+                    with company_scope(src['id'], src['name']):
+                        mark('source_queue', time.perf_counter()-queued_at)
+                        with measure('source'):
+                            return self._refresh_source(src, agents, detail_pool, say, years)
+                finally:
+                    with self._guard:
+                        active.pop(src['id'], None)
+                        self.progress['active'] = list(active.values())
+                        self.progress['completed'] += 1
+            for src in chosen:
+                futures[submit(pool, read_source, src, time.perf_counter())] = src
+            ready = deque()
+            while futures or ready:
+                # Harvest finished sources between every admitted batch. A
+                # large company cannot enqueue all its jobs ahead of another
+                # ready company. Only source IDs wait here; job text stays in
+                # SQLite until there is room in the bounded review queue.
+                done, _ = wait(futures, timeout=0 if ready else None, return_when=FIRST_COMPLETED)
+                for future in done:
+                    src = futures.pop(future)
+                    try:
+                        count, added, failure = future.result()
+                    except Exception as e:  # one company must never abort the others
+                        self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
+                        count, added, failure = 0, 0, src['name']
+                    counts['found'] += count
+                    counts['new'] += added
+                    if failure:
+                        failures.append(failure)
+                    completed = self.progress['completed']
+                    say(f'{completed}/{len(chosen)} companies completed')
+                    ready.append(src['id'])
+                if reviews.full:
+                    ready.clear()
+                elif ready:
+                    source_id = ready.popleft()
+                    batch = self.store.unchecked(eligibility.BATCH, {source_id}, exclude_ids=reviews.seen)
+                    reviews.add(batch)
+                    if len(batch) == eligibility.BATCH:
+                        ready.append(source_id)
+
+    def _review_progress(self, stats, say):
+        with self._guard:
+            self.progress.update(stats)
+            if self.progress.get('phase') == 'review':
+                self.progress['completed'] = stats['review_completed']
+                message = f'Reviewing jobs: {stats["review_completed"]}/{stats["review_total"]} completed'
+            else:
+                message = f'{self.progress.get("completed", 0)}/{self.progress.get("total", 0)} companies completed; '
+                message += f'{stats["review_completed"]}/{stats["review_total"]} jobs reviewed'
+            message += f'; {stats["review_active"]} in review, {stats["review_queued"]} queued.'
+        say(message)
 
     def _review_saved(self, profile, agents, say, source_ids=None):
         # Snapshot the queue once: uncertain answers must never create an
@@ -287,13 +315,8 @@ class JobService:
         total = len(todo)
         self.progress.update(phase='review', total=total, completed=0, active=[], started_at=int(time.time()))
         years = self.experience_years(profile)['years']
-        chunk = eligibility.BATCH * 3
-        for offset in range(0, total, chunk):
-            batch = todo[offset:offset+chunk]
-            say(f'Reviewing saved jobs: {offset}/{total} completed…')
-            self.store.set_eligibility(eligibility.check(batch, years, agents))
-            self.progress['completed'] = offset + len(batch)
-            say(f'Reviewing saved jobs: {self.progress["completed"]}/{total} completed…')
+        with ReviewQueue(self.store, years, agents, lambda stats: self._review_progress(stats, say)) as reviews:
+            reviews.add(todo)
         self.store.set_meta('last_review', int(time.time()))
         if not total:
             return 'No unreviewed saved jobs.'

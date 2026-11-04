@@ -315,14 +315,20 @@ class JobStore:
             c.execute('UPDATE jobs SET detail_attempted_at=? WHERE source_id=? AND external_id=?',
                       (time.time_ns(), source_id, external_id))
 
-    def unchecked(self, limit: int | None, source_ids=None) -> list[dict]:
+    def unchecked(self, limit: int | None, source_ids=None, *, exclude_ids=()) -> list[dict]:
+        if source_ids is not None:
+            source_ids = tuple(source_ids)
+            if not source_ids:
+                return []
+        scope = '' if source_ids is None else ' AND j.source_id IN (' + ','.join('?' for _ in source_ids) + ')'
         with self.db() as c:
             rows = [dict(r) for r in c.execute(
                 "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
                 "FROM jobs j JOIN sources s ON s.id=j.source_id "
                 "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden' AND j.manual_eligible IS NULL "
-                "AND (j.eligible IS NULL OR j.eligible != 'no') AND (j.relevant IS NULL OR j.relevant != 'no')")]
-        rows = [r for r in rows if (source_ids is None or r['source_id'] in source_ids)
+                "AND (j.eligible IS NULL OR j.eligible != 'no') AND (j.relevant IS NULL OR j.relevant != 'no')" + scope,
+                () if source_ids is None else tuple(source_ids))]
+        rows = [r for r in rows if r['id'] not in exclude_ids
                 and (r['status'] == 'applied' or location_matches(r['location'], r['locations']))]
         return newest_first(rows)[:limit]
 
