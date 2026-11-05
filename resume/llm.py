@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import time
+import threading
 from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -68,6 +69,31 @@ def api_key() -> str:
 
 
 _SESSION = ContextVar('jhalcv_credentials', default=None)
+_ROUTE_HEALTH = {}
+_HEALTH_LOCK = threading.Lock()
+ROUTE_COOLDOWN = 60
+
+
+def _health_key(route, session):
+    # Scope by workspace and credential identity without retaining a raw key.
+    return _cache_key([str(session.get('cache_dir') or CACHE_DIR), route['provider'],
+                       route['model'], route.get('key'), route.get('cli')])
+
+
+def _health(route, session):
+    with _HEALTH_LOCK:
+        return dict(_ROUTE_HEALTH.get(_health_key(route, session), {}))
+
+
+def _note_health(route, session, success):
+    now = time.monotonic()
+    with _HEALTH_LOCK:
+        if len(_ROUTE_HEALTH) > 256:
+            _ROUTE_HEALTH.clear()
+        previous = _ROUTE_HEALTH.get(_health_key(route, session), {})
+        _ROUTE_HEALTH[_health_key(route, session)] = {
+            'until': 0 if success else now + ROUTE_COOLDOWN,
+            'success': now if success else previous.get('success', 0)}
 
 
 @contextmanager
@@ -185,101 +211,80 @@ def ask(prompt: str, schema: dict, *, model: str = DEFAULT_MODEL,
         with credential_scope(CredentialStore().routes(openai_model=model)):
             return ask(prompt, schema, model=model, system=system, temperature=temperature,
                        schema_name=schema_name, cache=cache, timeout=timeout)
-    # GLM is out of every chain: a saved Z.AI key only serves GLM models, so it
-    # never tailors. Both chains run Codex first, then Claude Code.
     routes = sorted((r for r in session['routes'] if r['provider'] != 'zai'),
                     key=lambda r: r['id'] != session['preferred'])
     cli = cli_routes()
     if not routes and not cli:
         raise LLMAuthError('No API keys configured. Add a key in Settings or use rules mode.')
+    candidates = routes + cli
+    payloads = {}
+    for route in candidates:
+        payloads[route['id']] = {'version': 3 if route.get('cli') else 2, 'provider': route['provider'], 'model': route['model'],
+            'prompt': prompt, 'system': system, 'schema': strictify(schema),
+            'temperature': temperature, 'schema_name': schema_name}
+
+    def checked(value, route):
+        validate_output(value, payloads[route['id']]['schema'])
+        encoded = json.dumps(value, ensure_ascii=False)
+        if any(r.get('key') and r['key'] in encoded for r in session['routes']):
+            raise LLMError('Provider response contained sensitive data and was discarded.')
+        return value
+
+    def used(route):
+        session['last_call_failed'] = False
+        session['preferred'] = route['id']
+        metadata = {'provider': route['provider'], 'model': route['model']}
+        if metadata not in session['used']:
+            session['used'].append(metadata)
+
+    # Look across all configured routes before launching a provider. A warm
+    # fallback answer must not wait behind a cold or failing first provider.
+    if cache:
+        for route in candidates:
+            cached = _cache_read(_cache_key(payloads[route['id']]), session['cache_dir'])
+            if cached is None:
+                continue
+            try:
+                result = checked(cached, route)
+            except LLMError:
+                continue
+            from .usage import record_cache
+            record_cache(route['provider'], route['model'])
+            used(route)
+            return result, True
+
+    # Respect the saved API-key order, but prefer the last healthy CLI over an
+    # untried one. Failed routes cool down across requests in this process.
+    cli.sort(key=lambda route: -_health(route, session).get('success', 0))
     deadline = time.monotonic() + 120
-    for route in routes:
-        if route['id'] in session['failed']:
+    for route in routes + cli:
+        if route['id'] in session['failed'] or _health(route, session).get('until', 0) > time.monotonic():
             continue
         if time.monotonic() >= deadline:
             break
-        payload = {'version': 2, 'provider': route['provider'], 'model': route['model'],
-                   'prompt': prompt, 'system': system, 'schema': strictify(schema),
-                   'temperature': temperature, 'schema_name': schema_name}
-        cache_key = _cache_key(payload)
-        def checked(value):
-            validate_output(value, payload['schema'])
-            encoded = json.dumps(value, ensure_ascii=False)
-            if any(r['key'] in encoded for r in routes):
-                raise LLMError('Provider response contained sensitive data and was discarded.')
-            return value
         try:
-            result, hit = None, False
-            if cache:
-                cached = _cache_read(cache_key, session['cache_dir'])
-                if cached is not None:
-                    try:
-                        result, hit = checked(cached), True
-                        from .usage import record_cache
-                        record_cache(route['provider'], route['model'])
-                    except LLMError:
-                        pass
-            if result is None:
-                result = checked(call(route, prompt, schema, system, temperature, schema_name,
-                                      max(1, min(timeout, 30, deadline - time.monotonic()))))
-                if cache:
-                    try:
-                        _cache_write(cache_key, payload, result, session['cache_dir'])
-                    except OSError:
-                        pass  # Cache failures must not waste a successful API call.
-            session['last_call_failed'] = False
-            session['preferred'] = route['id']
-            used = {'provider': route['provider'], 'model': route['model']}
-            if used not in session['used']:
-                session['used'].append(used)
-            return result, hit
+            if route.get('cli'):
+                cli_prompt = ('SYSTEM INSTRUCTIONS\n' + system + '\n\nUNTRUSTED INPUT DATA\n' + prompt) if system else prompt
+                raw = _cli_ask(route['cli'], cli_prompt, payloads[route['id']]['schema'])
+            else:
+                raw = call(route, prompt, schema, system, temperature, schema_name,
+                           max(1, min(timeout, 30, deadline - time.monotonic())))
+            result = checked(raw, route)
         except (LLMError, OSError):
+            _note_health(route, session, False)
             session['failed'].add(route['id'])
             session['events'].append({'provider': route['provider'], 'status': 'failed'})
-    # API keys exhausted (or none saved): the subscription CLIs get a turn, so
-    # tailoring keeps working after a key is deleted or runs out of credits.
-    for route in cli:
-        if route['id'] in session['failed']:
             continue
-        payload = {'version': 2, 'provider': route['provider'], 'model': route['model'],
-                   'prompt': prompt, 'system': system, 'schema': strictify(schema),
-                   'temperature': temperature, 'schema_name': schema_name}
-        cache_key = _cache_key(payload)
-        def checked(value):
-            validate_output(value, payload['schema'])
-            encoded = json.dumps(value, ensure_ascii=False)
-            if any(r.get('key') and r['key'] in encoded for r in session['routes']):
-                raise LLMError('Provider response contained sensitive data and was discarded.')
-            return value
-        try:
-            result, hit = None, False
-            if cache:
-                cached = _cache_read(cache_key, session['cache_dir'])
-                if cached is not None:
-                    try:
-                        result, hit = checked(cached), True
-                        from .usage import record_cache
-                        record_cache(route['provider'], route['model'])
-                    except LLMError:
-                        pass
-            if result is None:
-                result = checked(_cli_ask(route['cli'], prompt, schema))
-                if cache:
-                    try:
-                        _cache_write(cache_key, payload, result, session['cache_dir'])
-                    except OSError:
-                        pass
-            session['last_call_failed'] = False
-            session['preferred'] = route['id']
-            used = {'provider': route['provider'], 'model': route['model']}
-            if used not in session['used']:
-                session['used'].append(used)
-            return result, hit
-        except (LLMError, OSError):
-            session['failed'].add(route['id'])
-            session['events'].append({'provider': route['provider'], 'status': 'failed'})
+        _note_health(route, session, True)
+        used(route)
+        if cache:
+            try:
+                _cache_write(_cache_key(payloads[route['id']]), payloads[route['id']], result, session['cache_dir'])
+            except OSError:
+                pass  # Never discard a successful inference because caching failed.
+        return result, False
     session['last_call_failed'] = True
-    raise LLMError('Configured API keys and AI CLIs were unavailable. Using rules mode.')
+    raise LLMError('Configured AI providers are unavailable or cooling down. Using rules mode.')
 
 
 if __name__ == "__main__":
