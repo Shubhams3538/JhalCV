@@ -11,11 +11,54 @@ from unittest.mock import patch
 from contextlib import nullcontext
 
 from resume.web import App, handler
+from resume.timing import stage
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebTests(unittest.TestCase):
+    def test_slow_tailoring_publishes_timings_without_blocking_state_or_duplicate_work(self):
+        self.app.store.save_profile(self.app.store.profile())
+        self.app.store.save_settings({**self.app.store.settings(), 'tailorer': 'rules'})
+        entered, release = threading.Event(), threading.Event()
+        results, errors = [], []
+        original = self.app.tailor_profile
+        def blocked(profile, jd, settings):
+            with stage('test_wait', 'Waiting for test inference'):
+                entered.set()
+                release.wait(3)
+            return original(profile, jd, settings)
+        headers = {'Content-Type': 'application/json', 'X-App-Token': self.app.token}
+        body = {'jd': 'Backend engineer building reliable Python REST APIs and database services.'}
+        def request():
+            try:
+                results.append(self.request('/api/tailor', body, headers))
+            except Exception as error:
+                errors.append(error)
+        with patch.object(self.app, 'tailor_profile', side_effect=blocked):
+            thread = threading.Thread(target=request)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                progress = self.request('/api/tailor/progress')
+                self.assertTrue(progress['running'])
+                self.assertEqual(progress['stage'], 'Waiting for test inference')
+                self.assertFalse(self.request('/api/state')['example'])
+                with self.assertRaises(urllib.error.HTTPError) as duplicate:
+                    self.request('/api/tailor', body, headers)
+                self.assertEqual(duplicate.exception.code, 400)
+            finally:
+                release.set()
+                thread.join(4)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        timing = results[0]['timings']
+        self.assertFalse(timing['running'])
+        self.assertGreaterEqual(timing['elapsed_seconds'], 0)
+        self.assertIn('test_wait', [entry['id'] for entry in timing['stages']])
+        self.assertNotIn(body['jd'], json.dumps(timing))
+        self.assertEqual(self.app.drafts[results[0]['id']]['report']['timings'], timing)
+
     def test_tailor_automatically_considers_full_library_without_project_selection(self):
         profile, _, headers = self.swap_fixture()
         for mode in ('rules', 'auto'):

@@ -26,6 +26,7 @@ const context = { $, state: {example: false}, draft: null, jobsTab: 'eligible',
   },
   renderJobs() {}, saveTailoringJob() {}, showView(view) {calls.push({view})},
   saveProfile: async () => {calls.push({save: true})},
+  startTailoringProgress() {}, stopTailoringProgress() {},
   renderDraft() {calls.push({render: true})}, notify() {}};
 vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf('async function tailorForJob('), source.indexOf('function insightBar(')), context);

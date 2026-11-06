@@ -29,6 +29,7 @@ from .insights import Insights, add_skill
 from .jobs.service import JobService
 from .jobs.agents import NAMES as CLI_NAMES
 from .usage import usage_scope
+from .timing import TailoringTiming, stage
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -46,6 +47,8 @@ class App:
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.drafts = {}
+        self.tailoring_lock = threading.Lock()
+        self.tailoring_timing = TailoringTiming()
 
     def state(self):
         return {'profile': self.store.profile(), 'settings': self.store.settings(),
@@ -57,6 +60,8 @@ class App:
                 'token': self.token}
 
     def post(self, path, body):
+        if path == '/api/tailor':
+            return self.tailor_request(body)
         with self.lock, usage_scope(self.usage, 'resume'):
             if path == '/api/usage/settings':
                 return self.usage.set_reference(body.get('model'))
@@ -135,18 +140,6 @@ class App:
                 return result
             if path == '/api/drafts/swap':
                 return self.swap_project(body)
-            if path == '/api/tailor':
-                settings = self.store.settings()
-                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
-                    result = self.create_draft(body)
-                suffix = self.inference_notice(session)
-                result['notice'] += suffix
-                draft = self.drafts[result['id']]
-                draft['notice'] += suffix
-                used = draft['report'].setdefault('providers_used', [])
-                used.extend(provider for provider in session['used'] if provider not in used)
-                draft['report']['key_failover_count'] = draft['report'].get('key_failover_count', 0) + len(session['events'])
-                return result
             if path in ('/api/preview', '/api/export'):
                 draft = self.get_draft(body.get('id'))
                 if path == '/api/preview':
@@ -159,6 +152,35 @@ class App:
                         raise ValueError('Could not compile the resume: ' + str(e)) from e
                 return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
+
+    def tailor_request(self, body):
+        if not self.tailoring_lock.acquire(blocking=False):
+            raise ValueError('A resume is already being tailored. Wait for it to finish.')
+        try:
+            with self.tailoring_timing.run(), usage_scope(self.usage, 'resume'):
+                with stage('profile', 'Reading saved profile'), self.lock:
+                    profile = self.store.profile()
+                    settings = self.store.settings()
+                    routes = self.credentials.routes(settings['model'])
+                # Inference works on a snapshot and never holds the main app
+                # lock, so progress and other tabs remain responsive.
+                with llm.credential_scope(routes, self.root / '.cache' / 'llm') as session:
+                    result = self.create_draft(body, profile=profile, settings=settings)
+                suffix = self.inference_notice(session)
+                with self.lock:
+                    result['notice'] += suffix
+                    draft = self.drafts[result['id']]
+                    draft['notice'] += suffix
+                    used = draft['report'].setdefault('providers_used', [])
+                    used.extend(provider for provider in session['used'] if provider not in used)
+                    draft['report']['key_failover_count'] = draft['report'].get('key_failover_count', 0) + len(session['events'])
+            timings = self.tailoring_timing.snapshot()
+            with self.lock:
+                result['timings'] = timings
+                draft['report']['timings'] = timings
+            return result
+        finally:
+            self.tailoring_lock.release()
 
 
     def jobs_action(self, path, body):
@@ -249,13 +271,13 @@ class App:
             raise ValueError('This draft expired. Create a new tailored draft.')
         return draft
 
-    def create_draft(self, body):
+    def create_draft(self, body, *, profile=None, settings=None):
         jd = text(body.get('jd'), 'Job description', 30000, True)
         if len(jd) < 40:
             raise ValueError('Paste a job description of at least 40 characters.')
         if not self.store.profile_path.exists():
             raise ValueError('Save your own profile before creating a resume.')
-        profile = self.store.profile()
+        profile = copy.deepcopy(profile if profile is not None else self.store.profile())
         library = copy.deepcopy(profile)
         # The browser uses the full library. Explicit subsets remain supported
         # for existing scripts, but are no longer a required UI step.
@@ -267,26 +289,27 @@ class App:
             profile['projects'] = [p for p in profile['projects'] if p['id'] in chosen]
         if not renderable(profile)['projects']:
             raise ValueError('Add a project with at least two confirmed, shipped bullets before creating a draft.')
-        settings = self.store.settings()
-        data, report = self.tailor_profile(profile, jd, settings)
-        rewritten, notice = rewrite_projects(data, jd, settings)
-        try:
-            self.insights.record(jd, report.get('matched_skills', []) + report.get('gap_skills', []))
-        except (OSError, ValueError):
-            notice += ' Skill insights could not be saved for this job.'
+        settings = settings if settings is not None else self.store.settings()
+        data, report, rewritten, notice = self.tailor_profile(profile, jd, settings)
         if report.get('tailorer') == 'rules' and settings['tailorer'] == 'auto':
             notice += ' Project selection used the rules fallback.'
-        return self.remember_draft(data, rewritten, jd, report, notice, library)
+        with stage('save', 'Saving the tailored draft'), self.lock:
+            try:
+                self.insights.record(jd, report.get('matched_skills', []) + report.get('gap_skills', []))
+            except (OSError, ValueError):
+                notice += ' Skill insights could not be saved for this job.'
+            return self.remember_draft(data, rewritten, jd, report, notice, library)
 
     @staticmethod
     def tailor_profile(profile, jd, settings):
         if settings['tailorer'] == 'rules':
-            data, report = tailor(profile, jd)
+            with stage('ranking', 'Ranking saved content'):
+                data, report = tailor(profile, jd)
             report['tailorer'] = 'rules'
+            return data, report, copy.deepcopy(data), 'Using your original project wording. Projects and skills are ranked for the job.'
         else:
-            from .llm_tailor import tailor_llm
-            data, report = tailor_llm(profile, jd, model=settings['model'])
-        return data, report
+            from .combined_tailor import tailor_once
+            return tailor_once(profile, jd, model=settings['model'])
 
     def swap_project(self, body):
         current = self.get_draft(body.get('id'))
@@ -360,6 +383,8 @@ def handler(app):
             if not self.trusted_host():
                 return self.reply(403, {'error': 'Use the local app URL printed in your terminal.'})
             path = urlsplit(self.path).path
+            if path == '/api/tailor/progress':
+                return self.reply(200, app.tailoring_timing.snapshot())
             if path == '/api/state':
                 try:
                     with app.lock:

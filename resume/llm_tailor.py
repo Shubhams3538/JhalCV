@@ -13,6 +13,7 @@ import re
 
 from . import llm
 from .insights import canonical
+from .timing import stage
 from .tailor import (ANGLE_KEYWORDS, parse_jd as parse_jd_rules,
                      tailor as tailor_rules, renderable, project_cap, MAX_SKILLS_PER_GROUP,
                      _score_bullet, _score_project)
@@ -191,6 +192,13 @@ def parse_jd_llm(jd_text: str, profile: dict, *, model: str = JD_MODEL,
         schema_name="jd_analysis",
         cache=cache,
     )
+    return analysis_from_raw(raw, jd_text, profile), hit
+
+
+def analysis_from_raw(raw, jd_text, profile):
+    """Validate/merge an analysis from either the staged or combined request."""
+    raw = dict(raw)
+    vocab = _vocabulary(profile)
     raw["_jd_blob"] = " " + jd_text.lower() + " "
     result = normalise(raw, vocab)
 
@@ -212,7 +220,7 @@ def parse_jd_llm(jd_text: str, profile: dict, *, model: str = JD_MODEL,
                                   if canonical(g) not in optional)
     result["_angles_from"] = "llm"
     result["_skills_from"] = "rules+llm"
-    return result, hit
+    return result
 
 
 def parse_jd_safe(jd_text: str, profile: dict, **kw) -> tuple[dict, str]:
@@ -455,11 +463,13 @@ def tailor_llm(profile: dict, jd_text: str, *, max_projects: int = 2,
         return data, report
 
     try:
-        analysis, jd_hit = parse_jd_llm(jd_text, profile, model=model or JD_MODEL, cache=cache)
-        selection, problems, sel_hit, raw = select_llm(
-            profile, analysis, max_projects=max_projects,
-            bullets_per_project=bullets_per_project, model=model or SELECT_MODEL, cache=cache,
-            jd_text=jd_text)
+        with stage('analysis', 'Analyzing the job description'):
+            analysis, jd_hit = parse_jd_llm(jd_text, profile, model=model or JD_MODEL, cache=cache)
+        with stage('selection', 'Selecting projects and bullets'):
+            selection, problems, sel_hit, raw = select_llm(
+                profile, analysis, max_projects=max_projects,
+                bullets_per_project=bullets_per_project, model=model or SELECT_MODEL, cache=cache,
+                jd_text=jd_text)
     except llm.LLMError as e:
         report["llm"] = {"used": False, "reason": str(e)}
         return data, report

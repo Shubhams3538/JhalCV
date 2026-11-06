@@ -24,6 +24,11 @@ def within(value, original):
             and set(NUMBERS.findall(value)).issubset(set(NUMBERS.findall(original))))
 
 
+def valid_rewrite(value, original):
+    return (within(value, original) and BOLD.findall(value) == BOLD.findall(original)
+            and value.count('**') == original.count('**'))
+
+
 def clean_readme(value):
     """Plain text for prompts and fallback bullets; never execute/render Markdown."""
     value = re.sub(r'```[\s\S]*?```', '', value)
@@ -124,7 +129,7 @@ def rewrite_projects(data, jd, settings):
                 raise ValueError('Wrong bullet count.')
             for i, (old, new) in enumerate(zip(source['bullets'], bullets)):
                 # Bold phrases are the user's own emphasis: the AI may not drop or move them.
-                if within(new, old) and BOLD.findall(new) == BOLD.findall(old) and new.count('**') == old.count('**'):
+                if valid_rewrite(new, old):
                     dest['bullets'][i] = new.strip()
                 else:
                     rejected += 1

@@ -73,7 +73,7 @@ function updateActivity(progress) {
       el('span', {class: 'activity-dot'}),
       el('span', {class: 'activity-title',
         text: progress.test ? 'Test refresh (scratch database)'
-          : progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
+          : progress.phase === 'review' ? 'Reviewing jobs' : 'Refreshing jobs'}),
       el('button', {class: 'activity-close', type: 'button', title: 'Hide for this task', text: '✕',
         onclick: e => { e.stopPropagation(); activityDismissed = true; card.hidden = true; }})
     ])];
@@ -943,11 +943,38 @@ async function importProject() {
     wrap.hidden = true; $('#github-url').value = ''; invalidate(); renderProjects(); notify('Project added and saved.');
   })}), el('button', {class: 'text-button', text: 'Discard import', onclick: () => {imported = null; wrap.hidden = true;}}));
 }
+let tailoringPoll = null, tailoringRun = null, tailoringGeneration = 0;
+function startTailoringProgress() {
+  tailoringRun = null;
+  const generation = ++tailoringGeneration;
+  const node = $('#tailor-progress'); node.hidden = false; node.textContent = 'Starting tailoring…';
+  const poll = async () => {
+    try {
+      const status = await api('tailor/progress');
+      if (generation !== tailoringGeneration) return;
+      if (status.running) tailoringRun = status.id;
+      if (status.running || (tailoringRun && status.id === tailoringRun)) {
+        node.textContent = `${status.stage || 'Tailoring'} · ${(status.elapsed_seconds || 0).toFixed(1)}s`;
+      }
+    } catch { /* Timing polls must never interrupt a resume request. */ }
+  };
+  clearInterval(tailoringPoll); tailoringPoll = setInterval(poll, 500);
+}
+function stopTailoringProgress(result) {
+  clearInterval(tailoringPoll); tailoringPoll = null;
+  tailoringGeneration++;
+  const node = $('#tailor-progress');
+  if (result?.timings) node.textContent = `Draft ready · ${result.timings.elapsed_seconds.toFixed(1)}s`;
+  else node.hidden = true;
+}
 async function createDraft() {
   if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
   if ($('#jd').value.trim().length < 40) throw new Error('Paste a job description of at least 40 characters.');
   await saveProfile();
-  draft = await api('tailor', {jd: $('#jd').value});
+  startTailoringProgress();
+  let generated = null;
+  try { generated = await api('tailor', {jd: $('#jd').value}); draft = generated; }
+  finally { stopTailoringProgress(generated); }
   renderDraft();
   notify('Draft ready. Review the project wording, then preview your PDF.');
 }
@@ -955,6 +982,9 @@ function renderDraft() {
   $('#empty-preview').hidden = true;
   const wrap = $('#draft-preview'); wrap.hidden = false; wrap.replaceChildren();
   wrap.append(el('div', {class: 'report', text: draft.notice}));
+  if (draft.timings) wrap.append(el('details', {class: 'report'}, [
+    el('summary', {text: `Tailoring completed in ${draft.timings.elapsed_seconds.toFixed(1)}s`}),
+    ...draft.timings.stages.map(stage => el('p', {text: `${stage.label}: ${stage.seconds.toFixed(2)}s`}))]));
   draft.projects.forEach((p, pi) => {
     const card = el('article', {class: 'panel draft-project'}, [el('h3', {text: p.name}), el('p', {class: 'hint', text: 'Keep each bullet within its original character and word budget.'})]);
     const alternatives = (draft.library || []).filter(candidate => !draft.projects.some(chosen => chosen.id === candidate.id));
