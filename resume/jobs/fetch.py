@@ -261,27 +261,9 @@ def render_page(url: str) -> str:
 
 @timed('browser')
 def _render_page(chrome, url):
-    with tempfile.TemporaryDirectory(prefix='jhalcv-chrome-') as profile:
-        try:
-            proc = subprocess.run(
-                [chrome, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-                 '--disable-extensions', '--mute-audio', f'--user-data-dir={profile}',
-                 # The default headless agent says "HeadlessChrome", which bot
-                 # filters (Cloudflare, Uber, SAP, Akamai) reject before any
-                 # job HTML is served; send the agent a real tab would, and
-                 # hide the automation flag headless mode otherwise sets.
-                 f'--user-agent={HEADERS["User-Agent"]}',
-                 '--disable-blink-features=AutomationControlled',
-                 # Bound the load so a page that keeps polling analytics still
-                 # dumps its DOM instead of hanging until the hard timeout.
-                 '--virtual-time-budget=9000', '--timeout=60000', '--dump-dom', url],
-                capture_output=True, timeout=remaining(RENDER_TIMEOUT))
-        except subprocess.TimeoutExpired:
-            raise FetchError('The page took too long to load in the browser.') from None
-        except OSError:
-            raise FetchError('Could not start Chrome to load this page.') from None
-    page = proc.stdout[:MAX_BYTES].decode('utf-8', errors='replace')
-    if proc.returncode != 0 or len(page) < 500:
+    from .browser_pool import render
+    page = render(chrome, url).encode('utf-8')[:MAX_BYTES].decode('utf-8', errors='replace')
+    if len(page) < 500:
         raise FetchError('Chrome could not load this page.')
     return page
 

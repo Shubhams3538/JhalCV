@@ -498,4 +498,6 @@ def main():
     except KeyboardInterrupt:
         print('\nStopped.')
     finally:
+        from .jobs.browser_pool import close as close_browsers
+        close_browsers()
         server.server_close()
