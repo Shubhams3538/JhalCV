@@ -445,6 +445,13 @@ class JobService:
         if self._last_prune is None or now - self._last_prune >= 60:
             self._last_prune = now
             self.store.prune_old()
+        years = self.experience_years(profile)['years']
+        guarded = f'{eligibility.GUARD_VERSION}:{years}'
+        if self.store.get_meta('eligibility_guard') != guarded:
+            # Verdicts saved before the current code check, or for another
+            # experience value, are re-checked once; no AI call is needed.
+            self.store.guard_saved(lambda verdict, title, text: eligibility.guard(verdict, title, text, years))
+            self.store.set_meta('eligibility_guard', guarded)
         return {'sources': [{**s, 'label': sources.LABELS.get(s['kind'], 'Career page')} for s in self.store.sources()],
                 'jobs': self.store.jobs(), 'progress': dict(self.progress),
                 'experience': self.experience_years(profile),

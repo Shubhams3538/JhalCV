@@ -257,6 +257,31 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(eligibility.rule_check('Requires 3+ years of experience in Go.', 2.4)['eligible'], 'no')
         self.assertEqual(eligibility.rule_check('1-2 years of industry experience', 2.4)['eligible'], 'yes')
         self.assertEqual(eligibility.rule_check('Great team, 5 years old company.', 2.4)['eligible'], 'unclear')
+        # Every required line must be met, so the largest count decides.
+        self.assertEqual(eligibility.rule_check('2+ years of Camel experience.\n8+ years of Java experience.', 2.4)['eligible'], 'no')
+
+    def test_code_vetoes_ai_yes_from_full_posting(self):
+        yes = {'min_years': None, 'eligible': 'yes', 'reason': 'No minimum stated.'}
+        filler = 'About us and our mission.\n' * 150  # requirement sits far past MAX_TEXT
+        cases = {
+            filler + "What you'll bring:\n10 + years of related industry experience": 'no',
+            "What You'll Need:\n4+ years of experience designing systems, preferably in Go": 'no',
+            "What You Will Bring\nBachelor's or Master's (preferred) in Computer Science\n2yrs-3.5yrs years of industry experience": 'no',
+            '7+ years in a Site Reliability Engineering, DevOps, or Infrastructure-focused role.': 'no',
+            'Preferred Qualifications\nExperience: 6+ years of Salesforce support experience': 'unclear',
+            'Minimum: 1+ years of experience.\nPreferred Qualifications\n5+ years of Kafka experience': 'yes',
+            '3+ years of Go experience is a plus.\nRequired: 1 to 3 years of experience.': 'yes',
+            '1 to 3 years of experience working in DevOps.': 'yes',
+            'Work with a friendly team.': 'yes',
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text[-60:]):
+                self.assertEqual(eligibility.guard(yes, 'Engineer', text, 1.5)['eligible'], expected)
+        self.assertEqual(eligibility.guard(yes, 'Data Engineer III', 'Work with a friendly team.', 1.5)['eligible'], 'unclear')
+        self.assertEqual(eligibility.guard({**yes, 'min_years': 3}, 'Engineer', '', 1.5)['eligible'], 'no')
+        no = {'min_years': None, 'eligible': 'no', 'reason': 'Senior role.'}
+        self.assertEqual(eligibility.guard(no, 'Engineer', '1 year of experience.', 1.5), no)  # never upgrades
+        self.assertIn('10 + years', eligibility.experience_lines(filler + '10 + years of related industry experience'))
 
     def test_ai_date_believability(self):
         self.assertEqual(eligibility.ai_date(date.today().isoformat()), date.today().isoformat())

@@ -342,6 +342,21 @@ class JobStore:
                           [(v['min_years'], v['eligible'], v['reason'], v['by'], v.get('relevant'),
                             v.get('relevance_reason', ''), v.get('posted', ''), v.get('posted', ''), ident) for ident, v in verdicts.items()])
 
+    def guard_saved(self, guard) -> int:
+        """Re-apply the code check to saved "yes" verdicts; returns how many changed."""
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            changed = 0
+            for row in list(c.execute("SELECT id, title, requirements, description, min_years, eligible, reason "
+                                      "FROM jobs WHERE eligible='yes'")):
+                before = {'min_years': row['min_years'], 'eligible': row['eligible'], 'reason': row['reason']}
+                after = guard(before, row['title'], f"{row['requirements']}\n{row['description']}")
+                if after != before:
+                    c.execute('UPDATE jobs SET min_years=?, eligible=?, reason=? WHERE id=?',
+                              (after['min_years'], after['eligible'], after['reason'], row['id']))
+                    changed += 1
+            return changed
+
     def reset_eligibility(self) -> None:
         with self.db() as c:
             c.execute('UPDATE jobs SET min_years=NULL, eligible=NULL, reason=NULL, checked_by=NULL')
