@@ -27,6 +27,49 @@ The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
 Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
 URL yourself, use `python3 app.py --port 8765 --no-browser`.
 
+### First-time setup
+
+New workspaces open a five-step setup menu. Existing profiles and company lists
+are preserved; open **Settings → Run setup again** to review your current setup.
+
+1. Import a text-based **PDF or DOCX up to 1 MB**, or enter your profile manually.
+   Local extraction fills readable experience, education, project and skill
+   sections, plus contact details and GitHub/LinkedIn links (including hyperlink
+   targets hidden behind labels). Scanned PDFs need a text version or manual
+   entry. PDF extraction reads the first ten pages.
+2. Choose **Codex**, **Claude Code**, a supported API provider, automatic fallback,
+   or **rules only**. Installed CLIs are detected; a separate connection test
+   checks whether the selected provider can answer. That test consumes a small
+   amount of quota and sends no resume. API keys are saved immediately, locally.
+3. With an AI selected, **Fill profile from resume** automatically structures the
+   extracted text before opening the editable profile form. Rules mode uses local
+   suggestions. Confirm contact details, links, experience, education, skills,
+   projects and achievements; a checklist asks for missing details. GitHub and
+   LinkedIn fields are always visible and optional if unavailable. Missing
+   experience requires adding entries or explicitly confirming fresher status.
+   Experience years are suggested from employment dates and remain editable.
+   Resume text is sent to AI only by this explicit action. Every project needs
+   at least **three confirmed bullets**; missing claims must be supplied by you.
+4. Confirm professional experience (zero for freshers), target roles, excluded
+   titles, locations, output folder, filename, project count and companies.
+   New users receive the editable catalog in `data/companies.json` (147 companies).
+   Removing an existing company also removes its saved jobs on completion.
+5. Build and review the actual one-page PDF, confirm accuracy, then finish.
+   Setup checks PDF tools, folder write access, profile completeness and page fit.
+   Changing details requires a fresh preview. Saved profile text remains editable
+   afterwards; one-page checks still run on every resume export.
+
+The selected provider is shared by resume and job AI. Selecting a specific
+provider disables fallback to others; automatic mode permits fallback. Rules mode
+requires no subscription. **Gemini API** offers an account/model-dependent free
+tier; current terms are linked in setup. Gemini CLI and Antigravity are detected
+but their direct integrations are not enabled in this release. No subscription
+tokens are copied from those apps. Setup does not install software automatically.
+
+Unfinished form edits stay in the current tab until it is closed or refreshed.
+Only the final confirmation saves profile/preferences/companies; API-key additions
+are independent and persist even if setup is cancelled.
+
 In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, Z.AI (GLM), or
 OpenRouter keys. A provider-specific model menu selects a default automatically;
 you can choose another named model or **Other model…** for a custom ID. Saved

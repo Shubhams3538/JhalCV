@@ -193,7 +193,8 @@ class JobService:
 
     def _refresh_locked(self, profile, say, recheck_only, source_ids, test=False):
         self.store.prune_old()
-        agents = Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
+        from ..onboarding import saved, ConfiguredAgents
+        agents = ConfiguredAgents(self.root, self.usage) if saved(self.root).get('completed') else Agents(usage_store=self.usage, cache_dir=self.root / '.cache' / 'jobs-ai')
         if recheck_only:
             return self._review_saved(profile, agents, say, source_ids)
         found = new = 0
@@ -457,4 +458,9 @@ class JobService:
                 'experience': self.experience_years(profile),
                 'last_refresh': self.store.get_meta('last_refresh'),
                 'unreviewed_count': len(self.store.unchecked(None)),
-                'agents': [NAMES[a] for a in Agents().order]}
+                'agents': self.agent_labels()}
+
+    def agent_labels(self):
+        from ..onboarding import saved, ConfiguredAgents
+        agents = ConfiguredAgents(self.root, self.usage) if saved(self.root).get('completed') else Agents()
+        return [NAMES[a] for a in agents.order]

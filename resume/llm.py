@@ -97,9 +97,9 @@ def _note_health(route, session, success):
 
 
 @contextmanager
-def credential_scope(routes, cache_dir=None):
+def credential_scope(routes, cache_dir=None, *, cli_names=None):
     session = {'routes': routes, 'failed': set(), 'preferred': None, 'events': [],
-               'used': [], 'cache_dir': cache_dir, 'last_call_failed': False}
+               'used': [], 'cache_dir': cache_dir, 'last_call_failed': False, 'cli_names': cli_names}
     token = _SESSION.set(session)
     try:
         yield session
@@ -122,9 +122,11 @@ def cli_routes() -> list[dict]:
     """Codex first, then Claude Code: the same subscription-CLI order the jobs
     pipeline uses, so tailoring also works with no API key at all. Empty when
     the CLIs are not installed."""
+    session = _SESSION.get()
+    allowed = session.get('cli_names') if session else None
     return [{'id': f'cli:{name}', 'provider': name, 'model': model, 'cli': name}
             for name, model in (('codex', 'codex-default'), ('claude', 'sonnet'))
-            if shutil.which(name)]
+            if shutil.which(name) and (allowed is None or name in allowed)]
 
 
 def _cli_ask(name: str, prompt: str, schema: dict) -> dict:

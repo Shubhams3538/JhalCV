@@ -6,6 +6,7 @@
   <title>JhalCV — Your resume workspace</title>
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
+  <script src="/onboarding.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -303,6 +304,7 @@
 </section>
 
 <section id="settings" class="view" hidden>
+  <button id="reopen-setup" type="button" class="secondary">Run setup again</button>
   <div class="page-title">
     <h1>Settings</h1>
     <p>Manage AI providers, resume output, and tailoring preferences.</p>
@@ -388,5 +390,13 @@
   <small>You can change this choice later in Settings.</small>
 </dialog>
 
+<dialog id="setup-dialog" aria-labelledby="setup-title">
+  <div class="setup-heading"><div><small id="setup-count"></small><h1 id="setup-title">Welcome to JhalCV</h1></div><span class="pill">YOUR WORKSPACE</span></div>
+  <ol id="setup-steps" aria-label="Setup steps"></ol>
+  <p id="setup-feedback" role="status" aria-live="polite" hidden></p>
+  <div id="setup-content"></div>
+  <div id="setup-actions"></div>
+  <p class="hint">Your confirmed profile stays on this computer. AI requests use the provider you select. API keys are saved when you add them; other setup changes are saved at the final step.</p>
+</dialog>
 </body>
 </html>

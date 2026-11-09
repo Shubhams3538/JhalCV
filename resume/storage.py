@@ -69,6 +69,9 @@ def focus_list(values, label, limit=50):
 
 def validate_profile(profile):
     obj(profile, 'Profile')
+    minimum = obj(profile.get('_locked', {}), 'Locked settings').get('min_project_bullets', 2)
+    if type(minimum) is not int or minimum not in (2, 3):
+        raise ValueError('Project bullet minimum must be 2 or 3.')
     basics = obj(profile.get('basics'), 'Contact details')
     for key in ('name', 'email', 'phone'):
         text(basics.get(key), key, 200, key == 'name')
@@ -106,8 +109,8 @@ def validate_profile(profile):
                         raise ValueError('Bullet status must be shipped or planned.')
                     if 'angles' in b:
                         b['angles'] = focus_list(b['angles'], 'Bullet focus areas', 10)
-                if section == 'projects' and sum(b.get('status', 'shipped') == 'shipped' for b in bullets) < 2:
-                    raise ValueError('Each project needs at least two confirmed, shipped bullets.')
+                if section == 'projects' and sum(b.get('status', 'shipped') == 'shipped' for b in bullets) < minimum:
+                    raise ValueError('Each project needs at least ' + ('three' if minimum == 3 else 'two') + ' confirmed, shipped bullets.')
                 quota = entry.get('max_bullets', 4)
                 if type(quota) is not int or not 1 <= quota <= 30:
                     raise ValueError('max_bullets must be between 1 and 30.')

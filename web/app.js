@@ -27,6 +27,12 @@ const el = (tag, props = {}, children = []) => {
 let state, profile, draft = null, imported = null, busy = false;
 let noticeTimer, viewRevision = 0;
 function notify(message, error = false) {
+  const setupFeedback = document.querySelector('#setup-feedback');
+  if (setupFeedback && document.querySelector('#setup-dialog')?.open) {
+    setupFeedback.hidden = false;
+    setupFeedback.textContent = message;
+    setupFeedback.className = error ? 'error' : 'hint';
+  }
   clearTimeout(noticeTimer);
   const notice = $('#notice');
   notice.hidden = false;
@@ -202,7 +208,7 @@ const commaList = s => s.split(',').map(x => x.trim()).filter(Boolean);
 function bulletEditor(entry, allowPlanned = true) {
   const wrap = el('div', {class: 'wide bullet-editor'});
   function render() {
-    wrap.replaceChildren(el('p', {class: 'hint', text: allowPlanned ? 'Each bullet keeps its own status. Planned project work never appears on the resume. At least two shipped bullets are required per project.' : 'Experience renders exactly as saved. Add only confirmed work.'}));
+    wrap.replaceChildren(el('p', {class: 'hint', text: allowPlanned ? 'Each bullet keeps its own status. Planned project work never appears on the resume. Complete setup with at least three confirmed, shipped bullets per project. Three are shown by default.' : 'Experience renders exactly as saved. Add only confirmed work.'}));
     entry.bullets.forEach((bullet, index) => {
       const row = el('div', {class: 'bullet-row'});
       row.append(field('Bullet ' + (index + 1), bullet.text, value => bullet.text = value, {area: true}));
@@ -652,12 +658,15 @@ function modelEditor(key) {
     })})]);
 }
 function updateAiStatus() {
+  const choice = state.setup?.preferences?.provider || 'auto';
   $('#ai-status').textContent = state.ai_available && state.settings.tailorer !== 'rules'
-    ? 'AI available · automatic key failover' : 'Rules mode · your original wording';
+    ? (choice === 'auto' ? 'AI available · automatic provider fallback' : 'AI selected · ' + choice) : 'Rules mode · your original wording';
 }
 function renderKeys() {
   const info = state.credentials;
-  state.ai_available = info.keys.length > 0;
+  const choice = state.setup?.preferences?.provider || 'auto';
+  const installed = (state.setup?.agents || []).some(a => a.supported && a.installed && (choice === 'auto' || choice === a.id));
+  state.ai_available = choice !== 'rules' && (installed || info.keys.some(k => choice === 'auto' || k.provider === choice));
   updateAiStatus();
   $('#api-reminder-enabled').checked = !info.reminder_dismissed;
   const list = $('#api-key-list'); list.replaceChildren();
@@ -722,7 +731,7 @@ function setupKeys() {
       throw error;
     }
   });
-  if (info.show_reminder) reminder.showModal();
+  if (info.show_reminder && !state.setup?.required && !state.setup?.completed) reminder.showModal();
 }
 function renderUsage(data) {
   const n = value => Number(value).toLocaleString();
@@ -807,6 +816,17 @@ async function init() {
   $('#output-dir').value = s.output_dir; $('#filename').value = s.filename;
   $('#tailoring-mode').value = s.tailorer; $('#model').value = s.model;
   setupKeys();
+  $('#reopen-setup').onclick = e => task(e.target, () => openSetup());
+  $('#setup-dialog').addEventListener('cancel', e => {if (state.setup?.required) e.preventDefault();});
+  $('#setup-content').addEventListener('input', () => {
+    if (setupDraft && setupStep === 2) {
+      setupDraft.profileTouched = true; setupChanged(); updateSetupMissing();
+    }
+  });
+  $('#setup-content').addEventListener('click', e => {
+    if (setupDraft && setupStep === 2 && e.target.closest('button') && !e.target.closest('button').textContent.startsWith('Refill profile')) setupDraft.profileTouched = true;
+  });
+  if (state.setup?.required) await openSetup(false);
   try {
     const saved = JSON.parse(sessionStorage.getItem('jhalcv-tailoring-job') || 'null');
     if (saved && Number.isInteger(saved.id) && typeof saved.title === 'string' && typeof saved.company === 'string') tailoringJob = saved;
@@ -829,7 +849,7 @@ async function init() {
   const missing = Object.entries(state.dependencies).filter(([, ok]) => !ok).map(([name]) => name);
   $('#dependencies').textContent = missing.length ? 'Missing PDF tools: ' + missing.join(', ') + '. See the README setup.' : '✓ All PDF tools are installed.';
   $('#dependencies').className = missing.length ? 'warning' : 'hint';
-  if (state.example) notify('You’re viewing a sample profile. Open My profile and replace the sample details before creating your resume.');
+  if (state.example && !state.setup?.required) notify('You’re viewing a sample profile. Open My profile and replace the sample details before creating your resume.');
   document.querySelectorAll('.nav').forEach(b => b.onclick = () => showView(b.dataset.view));
   document.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
     document.querySelectorAll('.seg-btn').forEach(x => {
@@ -857,7 +877,7 @@ async function init() {
     notify('Settings saved.');
   });};
   $('#manual-project').onclick = () => {
-    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
+    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}, {id: id+'-3', angles: ['backend'], text: 'Describe the confirmed outcome.'}]});
     invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
   };
   $('#import-project').onclick = e => task(e.target, importProject);

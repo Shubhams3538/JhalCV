@@ -30,6 +30,7 @@ from .jobs.service import JobService
 from .jobs.agents import NAMES as CLI_NAMES
 from .usage import usage_scope
 from .timing import TailoringTiming, stage
+from . import onboarding
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_BODY = 2_000_000
@@ -49,6 +50,8 @@ class App:
         self.drafts = {}
         self.tailoring_lock = threading.Lock()
         self.tailoring_timing = TailoringTiming()
+        self.setup_checks = {}
+        self.setup_ai_checks = {}
 
     def state(self):
         return {'profile': self.store.profile(), 'settings': self.store.settings(),
@@ -57,12 +60,20 @@ class App:
                 'credentials': self.credentials.public(self.store.settings()['model']),
                 'profile_revision': self.profile_revision(),
                 'dependencies': {cmd: bool(shutil.which(cmd)) for cmd in ('typst', 'pdfinfo', 'pdftotext')},
-                'token': self.token}
+                'setup': onboarding.status(self), 'token': self.token}
 
     def post(self, path, body):
         if path == '/api/tailor':
             return self.tailor_request(body)
+        if path == '/api/setup/structure':
+            with usage_scope(self.usage, 'resume'):
+                profile = onboarding.structure(body.get('text'), self.root, self.credentials, body.get('provider'))
+                with self.lock:
+                    self.setup_ai_checks[body.get('provider')] = time.monotonic()
+                return {'profile': profile, 'review': onboarding.review_summary(profile)}
         with self.lock, usage_scope(self.usage, 'resume'):
+            if path.startswith('/api/setup/'):
+                return self.setup_action(path, body)
             if path == '/api/usage/settings':
                 return self.usage.set_reference(body.get('model'))
             if path == '/api/profile':
@@ -134,7 +145,7 @@ class App:
                 jd = text(body.get('jd', ''), 'Job description', 30000)
                 evidence = fetch_repository(body.get('url'))
                 settings = self.store.settings()
-                with llm.credential_scope(self.credentials.routes(settings['model']), self.root / '.cache' / 'llm') as session:
+                with onboarding.scope(self.root, self.credentials) as session:
                     result = import_project(evidence, jd, settings)
                 result['notice'] += self.inference_notice(session)
                 return result
@@ -153,6 +164,78 @@ class App:
                 return export_preview(draft, body.get('revision'), self.store.settings())
             raise ValueError('Unknown action.')
 
+    def setup_action(self, path, body):
+        if path == '/api/setup/extract':
+            return onboarding.extract(body)
+        if path == '/api/setup/test-ai':
+            with onboarding.scope(self.root, self.credentials, body.get('provider')):
+                try:
+                    llm.ask('Return ready=true.', {'type': 'object', 'properties': {'ready': {'type': 'boolean', 'enum': [True]}}}, cache=False)
+                except llm.LLMError:
+                    raise ValueError('Connection failed. Sign in to the selected CLI or check the API key and quota, then retry. No resume was sent.') from None
+            self.setup_ai_checks[body.get('provider')] = time.monotonic()
+            return {'ready': True}
+        if path not in ('/api/setup/check', '/api/setup/complete'):
+            raise ValueError('Unknown setup action.')
+        self.check_revision(body.get('revision'))
+        profile, prefs, settings, companies = onboarding.validate(body, self.store)
+        if self.jobs.progress['running'] or self.jobs_test.progress['running']:
+            raise ValueError('Wait for the job refresh to finish before changing setup.')
+        signature = onboarding.fingerprint([profile, prefs, settings, companies])
+        if path == '/api/setup/check':
+            if prefs['provider'] != 'rules' and time.monotonic() - self.setup_ai_checks.get(prefs['provider'], -100000) > 3600:
+                raise ValueError('Test your selected AI connection on step 2 before finishing setup.')
+            missing = [cmd for cmd in ('typst', 'pdfinfo', 'pdftotext') if not shutil.which(cmd)]
+            if missing:
+                raise ValueError('Install the PDF tools before finishing setup: ' + ', '.join(missing))
+            import tempfile
+            destination = Path(settings['output_dir'])
+            destination.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryFile(dir=destination):
+                pass
+            data, report = tailor(profile, prefs['include'], bullets_per_project=3)
+            result = self.remember_draft(data, copy.deepcopy(data), '', report, 'Setup preview uses saved wording without AI.', profile)
+            preview = build_preview(self.drafts[result['id']], [{'bullets': p['bullets']} for p in data['projects']], self.root, result['id'])
+            receipt = secrets.token_urlsafe(24)
+            self.setup_checks = {receipt: {'signature': signature, 'created': time.monotonic(), 'draft': result['id']}}
+            return {**preview, 'receipt': receipt}
+        check = self.setup_checks.get(body.get('receipt', ''))
+        if not check or check['signature'] != signature or time.monotonic() - check['created'] > 3600:
+            raise ValueError('Build and review a fresh setup PDF after your latest changes.')
+        self.get_draft(check['draft'])
+        if body.get('confirmed') is not True:
+            raise ValueError('Confirm your details and review the PDF before finishing.')
+        # Roll back saved JSON and the source transaction together on a failed
+        # write. The final marker belongs to the same guarded operation.
+        from .storage import atomic_json
+        paths = [self.store.profile_path, self.store.settings_path, self.root / '.local' / 'setup.json']
+        previous = {path: json.loads(path.read_text()) if path.exists() else None for path in paths}
+        try:
+            with self.jobs.store.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                wanted = {c['url'] for c in companies}
+                for row in conn.execute('SELECT id, url FROM sources').fetchall():
+                    if row['url'] not in wanted:
+                        conn.execute('DELETE FROM sources WHERE id=?', (row['id'],))
+                for row in companies:
+                    conn.execute('INSERT INTO sources(name,url,kind,include,exclude,locations,created_at) VALUES(?,?,?,?,?,?,?) '
+                                 'ON CONFLICT(url) DO UPDATE SET name=excluded.name,include=excluded.include,exclude=excluded.exclude,locations=excluded.locations',
+                                 (row['name'], row['url'], row['kind'], prefs['include'], prefs['exclude'], prefs['locations'], int(time.time())))
+                self.store.save_profile(profile)
+                self.store.save_settings(settings)
+                conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('experience_years',?)", (str(prefs['years']),))
+                conn.execute('UPDATE jobs SET min_years=NULL, eligible=NULL, reason=NULL, checked_by=NULL')
+                atomic_json(paths[-1], {**prefs, 'completed': True, 'version': 1})
+        except Exception:
+            for path, value in previous.items():
+                if value is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_json(path, value)
+            raise
+        self.setup_checks.clear()
+        return self.state()
+
     def tailor_request(self, body):
         if not self.tailoring_lock.acquire(blocking=False):
             raise ValueError('A resume is already being tailored. Wait for it to finish.')
@@ -161,10 +244,10 @@ class App:
                 with stage('profile', 'Reading saved profile'), self.lock:
                     profile = self.store.profile()
                     settings = self.store.settings()
-                    routes = self.credentials.routes(settings['model'])
+                    routes, cli = onboarding.selection(self.root, self.credentials)
                 # Inference works on a snapshot and never holds the main app
                 # lock, so progress and other tabs remain responsive.
-                with llm.credential_scope(routes, self.root / '.cache' / 'llm') as session:
+                with llm.credential_scope(routes, self.root / '.cache' / 'llm', cli_names=cli) as session:
                     result = self.create_draft(body, profile=profile, settings=settings)
                 suffix = self.inference_notice(session)
                 with self.lock:
@@ -447,6 +530,7 @@ def handler(app):
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
                      '/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
+                     '/onboarding.js': ('onboarding.js', 'text/javascript; charset=utf-8'),
                      '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if path in files:
                 name, mime = files[path]
