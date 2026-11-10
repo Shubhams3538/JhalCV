@@ -70,6 +70,33 @@ Unfinished form edits stay in the current tab until it is closed or refreshed.
 Only the final confirmation saves profile/preferences/companies; API-key additions
 are independent and persist even if setup is cancelled.
 
+### Try setup as a completely new user
+
+Run this from the project folder:
+
+```bash
+python3 test_app.py
+```
+
+This opens a separate app instance labelled **FRESH TEST**, with blank onboarding,
+empty jobs/settings/credentials/usage, the starter company catalog, and a temporary
+PDF output folder. Your real workspace and running app are kept separate. Every
+run starts fresh; **Ctrl+C** stops the test app and deletes its temporary data.
+Avoid selecting a personal output folder if you want exported PDFs discarded too.
+
+Your installed AI tools are still detected. Explicitly selecting/testing a CLI
+uses its real login and quota. Personal API keys, `.env`, profile, caches and job
+databases are not copied or inherited; keys added during this test are disposable.
+
+For a terminal-only automatic startup/isolation check that cleans up immediately:
+
+```bash
+python3 test_app.py --check
+```
+
+Use `--no-browser` to open the printed URL yourself, or `--port 8770` to choose a
+test port. You can keep multiple fresh test instances open at different ports.
+
 In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, Z.AI (GLM), or
 OpenRouter keys. A provider-specific model menu selects a default automatically;
 you can choose another named model or **Other model…** for a custom ID. Saved
