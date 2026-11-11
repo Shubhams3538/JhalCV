@@ -85,6 +85,9 @@ def remaining(cap=TIMEOUT):
 
 _DNS_CACHE: dict[str, tuple[bool, float]] = {}
 _DNS_TTL = 300.0
+_CURL_HOSTS = {}  # Hosts whose current bot/TLS filter requires the curl transport.
+_CURL_LOCK = threading.Lock()
+_CURL_TTL = 300.0
 
 
 def _resolves_public(host: str) -> bool:
@@ -152,6 +155,28 @@ _OPENER = urllib.request.build_opener(_GuardedRedirects())
 @timed('http')
 def _open(request: urllib.request.Request, limit: int = MAX_BYTES) -> bytes:
     check_url(request.full_url)
+    host = urlsplit(request.full_url).netloc.lower()
+    with _CURL_LOCK:
+        prefer_curl = _CURL_HOSTS.get(host, 0) > time.monotonic()
+    if prefer_curl:
+        try:
+            return _curl(request, limit)
+        except FetchError:
+            # The site may have recovered or changed its filter; try the normal
+            # transport again, but do not retry curl twice for this request.
+            with _CURL_LOCK:
+                _CURL_HOSTS.pop(host, None)
+    def fallback():
+        if prefer_curl:
+            raise FetchError('Both HTTP transports failed.')
+        result = _curl(request, limit)
+        with _CURL_LOCK:
+            now = time.monotonic()
+            for key in list(_CURL_HOSTS):
+                if _CURL_HOSTS[key] <= now:
+                    del _CURL_HOSTS[key]
+            _CURL_HOSTS[host] = now + _CURL_TTL
+        return result
     try:
         with _OPENER.open(request, timeout=remaining()) as response:
             final = response.geturl()
@@ -163,14 +188,14 @@ def _open(request: urllib.request.Request, limit: int = MAX_BYTES) -> bytes:
         # Several career sites answer urllib with 403/406/429 while serving a
         # browser-shaped client normally; one curl attempt covers both cases.
         try:
-            return _curl(request, limit)
+            return fallback()
         except FetchError:
             raise FetchError(f'The site returned HTTP {e.code}.') from None
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as e:
         # Bot filters drop urllib's TLS handshake (a handshake timeout, not a
         # refused connection). curl negotiates HTTP/2 like a real browser.
         try:
-            return _curl(request, limit)
+            return fallback()
         except FetchError:
             raise FetchError('Could not reach the site. Check the URL and your connection.') from None
     if len(data) > limit:

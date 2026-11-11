@@ -268,7 +268,7 @@ class EligibilityTests(unittest.TestCase):
             "What You'll Need:\n4+ years of experience designing systems, preferably in Go": 'no',
             "What You Will Bring\nBachelor's or Master's (preferred) in Computer Science\n2yrs-3.5yrs years of industry experience": 'no',
             '7+ years in a Site Reliability Engineering, DevOps, or Infrastructure-focused role.': 'no',
-            'Preferred Qualifications\nExperience: 6+ years of Salesforce support experience': 'unclear',
+            'Preferred Qualifications\nExperience: 6+ years of Salesforce support experience': 'yes',
             'Minimum: 1+ years of experience.\nPreferred Qualifications\n5+ years of Kafka experience': 'yes',
             '3+ years of Go experience is a plus.\nRequired: 1 to 3 years of experience.': 'yes',
             '1 to 3 years of experience working in DevOps.': 'yes',

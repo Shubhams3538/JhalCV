@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import date
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl
 
@@ -25,6 +25,7 @@ TITLE_SCREEN_MIN = 16
 MAX_DETAILS = 40     # detail pages fetched per source per run (new jobs only)
 SOURCE_WORKERS = 8
 DETAIL_WORKERS = 12
+DETAIL_WINDOW = 3    # one source cannot reserve every shared detail worker
 SOURCE_SECONDS = 150
 
 # Every new job is checked in the refresh that finds it. The title screen, text
@@ -248,6 +249,9 @@ class JobService:
 
     def _fetch_into_reviews(self, chosen, agents, years, reviews, say, failures, counts):
         active = {}
+        # A single selected company can use the full pool. A broad refresh
+        # shares workers among sources instead of queueing every page at once.
+        detail_window = max(DETAIL_WINDOW, DETAIL_WORKERS // max(1, min(len(chosen), SOURCE_WORKERS)))
         with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as detail_pool, \
                 ThreadPoolExecutor(max_workers=SOURCE_WORKERS) as pool:
             futures = {}
@@ -259,7 +263,7 @@ class JobService:
                     with company_scope(src['id'], src['name']):
                         mark('source_queue', time.perf_counter()-queued_at)
                         with measure('source'):
-                            return self._refresh_source(src, agents, detail_pool, say, years)
+                            return self._refresh_source(src, agents, detail_pool, say, years, detail_window)
                 finally:
                     with self._guard:
                         active.pop(src['id'], None)
@@ -352,11 +356,12 @@ class JobService:
             return src
         return self.store.upgrade_source(src['id'], found['url'], found['kind']) or src
 
-    def _refresh_source(self, src, agents, detail_pool, say, years):
+    def _refresh_source(self, src, agents, detail_pool, say, years, detail_window=None):
         deadline = time.monotonic() + SOURCE_SECONDS
         found = new = 0
         failure = None
         attempted = set()
+        missing_locations = set()
         with fetch_budget(deadline):
             try:
                 src = self._upgrade_page_source(src)
@@ -372,6 +377,7 @@ class JobService:
                                       # and views still hide jobs that never get one.
                                       and (not j.get('location') or location_matches(j['location'], src['locations']))])[:sources.MAX_JOBS]
                 detail = sources.DETAILS.get(src['kind'])
+                missing_locations = {item['external_id'] for item in items if not item.get('location')}
                 known = self.store.known_ids(src['id'])
                 # Screening is worthwhile only when a large detail-only listing
                 # would otherwise trigger many network requests. Full feeds need no extra AI pass.
@@ -384,7 +390,7 @@ class JobService:
                                   and item['external_id'] not in screened
                                   and (not item['requirements'] or freshness(item.get('posted')) == 'unknown')][:MAX_DETAILS]
                     attempted.update(item['external_id'] for item in candidates)
-                    for item, data in self._details(candidates, detail, detail_pool, current_deadline()):
+                    for item, data in self._details(candidates, detail, detail_pool, current_deadline(), detail_window):
                         item.update(data)
                         if freshness(item.get('posted')) == 'expired':
                             self.store.dismiss_external(src['id'], item['external_id'])
@@ -401,13 +407,13 @@ class JobService:
                 for ext in attempted:
                     self.store.note_detail_attempt(src['id'], ext)
                 if detail and src['kind'] != 'page':
-                    candidates = self.store.detail_candidates(src['id'])
+                    candidates = self.store.detail_candidates(src['id'], missing_locations=missing_locations)
                     pending = [r for r in candidates if r['external_id'] in details
                                and r['external_id'] not in attempted][:MAX_DETAILS-len(attempted)]
                     requests = [dict(details[row['external_id']], saved_id=row['id']) for row in pending]
                     for row in pending:
                         self.store.note_detail_attempt(src['id'], row['external_id'])
-                    for item, data in self._details(requests, detail, detail_pool, current_deadline()):
+                    for item, data in self._details(requests, detail, detail_pool, current_deadline(), detail_window):
                         self.store.set_detail(item['saved_id'], data)
                 self.store.source_result(src['id'], count=len(items))
                 found, new = len(items), len(fresh)
@@ -416,28 +422,46 @@ class JobService:
                 mark('source_failure')
                 self.store.source_result(src['id'], error=str(e)[:500] or 'Could not read this source.')
             if src['kind'] == 'page':
-                pending = [r for r in self.store.detail_candidates(src['id'])
+                pending = [r for r in self.store.detail_candidates(src['id'], missing_locations=missing_locations)
                            if r['external_id'] not in attempted and r['url']][:MAX_DETAILS-len(attempted)]
                 requests = [{'needs_detail': row['url'], 'saved_id': row['id']} for row in pending]
                 for row in pending:
                     self.store.note_detail_attempt(src['id'], row['external_id'])
-                for item, data in self._details(requests, sources.DETAILS['page'], detail_pool, current_deadline()):
+                for item, data in self._details(requests, sources.DETAILS['page'], detail_pool, current_deadline(), detail_window):
                     self.store.set_detail(item['saved_id'], data)
         return found, new, failure
 
     @staticmethod
-    def _details(items, detail, pool, deadline):
+    def _details(items, detail, pool, deadline, window=None):
+        window = DETAIL_WINDOW if window is None else window
         def read(item, queued_at):
             mark('detail_queue', time.perf_counter()-queued_at)
             with fetch_budget(deadline), measure('details'):
                 remaining()
                 return detail(item)
-        futures = {submit(pool, read, item, time.perf_counter()): item for item in items}
-        for future in as_completed(futures):
-            try:
-                yield futures[future], future.result()
-            except (FetchError, AgentError, KeyError, ValueError, TypeError, IndexError, OSError):
-                pass  # One unreadable posting is skipped; it keeps its unknown date and retries next time.
+        pending = iter(items)
+        futures = {}
+        exhausted = False
+        while futures or not exhausted:
+            while not exhausted and len(futures) < window:
+                if deadline is not None and time.monotonic() >= deadline:
+                    exhausted = True
+                    break
+                try:
+                    item = next(pending)
+                except StopIteration:
+                    exhausted = True
+                    break
+                futures[submit(pool, read, item, time.perf_counter())] = item
+            if not futures:
+                break
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                item = futures.pop(future)
+                try:
+                    yield item, future.result()
+                except (FetchError, AgentError, KeyError, ValueError, TypeError, IndexError, OSError):
+                    pass  # Unreadable or deferred postings remain eligible for a later fetch.
 
     def state(self, profile: dict) -> dict:
         # The frontend polls this every couple of seconds during a refresh; the
@@ -457,7 +481,7 @@ class JobService:
                 'jobs': self.store.jobs(), 'progress': dict(self.progress),
                 'experience': self.experience_years(profile),
                 'last_refresh': self.store.get_meta('last_refresh'),
-                'unreviewed_count': len(self.store.unchecked(None)),
+                'unreviewed_count': len(self.store.unchecked(None, with_text=False)),
                 'agents': self.agent_labels()}
 
     def agent_labels(self):

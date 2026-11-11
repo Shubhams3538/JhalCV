@@ -55,6 +55,12 @@ For each job:
   not support; "unclear" only when the text genuinely does not let you decide.
 - reason: one short sentence quoting the requirement you used.
 
+Judge experience and software relevance only, not education, exact skills, citizenship or
+work authorization. Missing optional details do not disqualify a likely software match.
+For alternative experience paths joined by OR, use the lowest applicable minimum, not
+the largest count across the alternatives. Preserve fractional years and convert months
+to years. Preferred experience is not a mandatory minimum.
+
 The candidate has {years} years of professional experience.
 
 JOBS
@@ -69,7 +75,10 @@ def _month(value: str):
     m = re.match(r'([a-z]{3})[a-z]*\.?\s+(\d{4})', value)
     if m and m.group(1) in MONTHS:
         return int(m.group(2)) * 12 + MONTHS[m.group(1)] - 1
-    m = re.match(r'(\d{4})', value)
+    m = re.fullmatch(r'(\d{4})-(\d{2})(?:-\d{2})?', value)
+    if m:
+        return int(m.group(1)) * 12 + int(m.group(2)) - 1 if 1 <= int(m.group(2)) <= 12 else None
+    m = re.fullmatch(r'(\d{4})', value)
     return int(m.group(1)) * 12 if m else None
 
 
@@ -78,6 +87,7 @@ def profile_years(profile: dict) -> float:
     months = set()
     for e in profile.get('experience', []):
         start, end = _month(e.get('start')), _month(e.get('end'))
+        end = min(end, _month('present')) if end is not None else None
         if start is not None and end is not None and end >= start:
             months.update(range(start, end + 1))
     return round(len(months) / 12, 1)
@@ -85,8 +95,14 @@ def profile_years(profile: dict) -> float:
 
 # "3+ years", "3 to 5 years", "2–6 years", "10 + years", "2yrs-3.5yrs years".
 # The lower bound of a range is what the candidate must reach.
-_YEARS = re.compile(r'(?<![\d.])(\d{1,2})(?:\.\d+)?\s*\+?\s*(?:yrs?\.?|years?)?\s*'
-                    r'(?:(?:-|–|—|to)\s*\d{1,2}(?:\.\d+)?\s*\+?\s*)?(?:yrs?|years?)\b', re.I)
+_NUMBER_WORDS = dict(zip(('zero one two three four five six seven eight nine ten eleven twelve '
+                         'thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty').split(), range(21)))
+_NUMBER = r'(?:\d{1,3}(?:\.\d+)?|' + '|'.join(_NUMBER_WORDS) + r')'
+_UNIT = r'(?:yrs?|years?|months?)'
+_YEARS = re.compile(r'(?<![\w.])(' + _NUMBER + r')\s*\+?\s*'
+                    r'(?:(?P<first_unit>' + _UNIT + r')\.?\s*)?'
+                    r'(?:(?P<join>[-–—]|to|and)\s*(?P<second>' + _NUMBER + r')\s*\+?\s*)?'
+                    r'(?P<unit>' + _UNIT + r')\b', re.I)
 _EXPERIENCE = re.compile(r'experience|industry|professional|hands-on|\brole\b|track record|working in|'
                          r'in (?:a |an |the )?(?:software|engineering|similar|related)', re.I)
 _PREFERRED = re.compile(r'prefer|nice[- ]to[- ]have|good[- ]to[- ]have|\bplus\b|bonus|ideally|desir|advantage', re.I)
@@ -97,7 +113,13 @@ _REQUIRED = re.compile(r'requir|minimum|basic|must|qualification|what you.{0,8}(
 _NOT_A_REQUIREMENT = re.compile(r'\b(?:ago|old|history|founded|since|within|warranty|contract|tenure)\b', re.I)
 _SENIOR_TITLE = re.compile(r'\b(?:senior|sr\.?|staff|principal|lead|architect|manager|head|director|'
                            r'vice president|vp|distinguished|fellow|iii|iv|v|3|4|5)\b', re.I)
-GUARD_VERSION = '1'
+GUARD_VERSION = '2'
+
+
+def _duration_years(value, unit):
+    value = value.lower()
+    number = float(_NUMBER_WORDS[value]) if value in _NUMBER_WORDS else float(value)
+    return number / 12 if unit.lower().startswith('month') else number
 
 
 def requirement_years(text: str) -> tuple[list, list]:
@@ -105,12 +127,9 @@ def requirement_years(text: str) -> tuple[list, list]:
 
     Returns (hard, soft), each a list of (years, line). Hard lines clearly
     ask for N years of experience. Soft lines mention N years without a clear
-    experience context. Mentions marked preferred, by their own clause or by
-    a section heading, count only when the posting states no hard
-    requirement at all: then they are soft, because a posting whose only
-    year count is "preferred" still cannot be trusted as entry level.
+    experience context. Preferred counts never veto an otherwise likely match.
     """
-    hard, soft, preferred, preferred_section = [], [], [], False
+    hard, soft, preferred_section = [], [], False
     for raw in (text or '').splitlines():
         line = raw.strip(' \t•*-–·')
         if not line:
@@ -120,37 +139,52 @@ def requirement_years(text: str) -> tuple[list, list]:
                 preferred_section = True
             elif _REQUIRED.search(line):
                 preferred_section = False
-        for m in _YEARS.finditer(line):
-            years = int(m.group(1))
-            if not 1 <= years <= 20:
+        matches = list(_YEARS.finditer(line))
+        # Defer real alternative paths to the model, but "Python or Java and
+        # 2 years of leadership" still contains independent mandatory counts.
+        alternative = any(re.search(
+            r'\bor\s+(?:(?:at least|minimum|a minimum of)\s+)?$|'
+            r'\bor\s+[^,;]*(?:degree|bachelor|master|ph\.?d)[^,;]*$',
+            line[left.end():right.start()], re.I)
+            for left, right in zip(matches, matches[1:]))
+        if alternative:
+            continue
+        for m in matches:
+            first_unit = m.group('first_unit') or m.group('unit')
+            years = _duration_years(m.group(1), first_unit)
+            if (m.group('join') or '').lower() == 'and':
+                second = _duration_years(m.group('second'), m.group('unit'))
+                # A duration like "1 year and 6 months" is cumulative;
+                # separate year requirements joined by AND must both be met.
+                years = years + second if (not first_unit.lower().startswith('month')
+                        and m.group('unit').lower().startswith('month')) else max(years, second)
+            if not 0 <= years <= 50:
                 continue
             # "4+ years of X, preferably in Y" is required; "3 years of Go is
             # a plus" and "Preferred: 5 years" are not.
             clause = re.split(r'[,;.()]', line[m.end():], maxsplit=1)[0]
             if preferred_section or _PREFERRED.search(line[:m.start()]) or _PREFERRED.search(clause):
-                preferred.append((years, line))
                 continue
             window = line[max(0, m.start() - 60):m.end() + 80]
             if _EXPERIENCE.search(window) and not _NOT_A_REQUIREMENT.search(window):
                 hard.append((years, line))
             else:
                 soft.append((years, line))
-    if not hard:
-        soft += preferred
     return hard, soft
 
 
 def experience_lines(text: str, limit=1200) -> str:
     """Every year-count line in the posting, for the AI to read even when the
     qualifications text is truncated."""
-    hard, soft = requirement_years(text)
-    lines = list(dict.fromkeys(line for _, line in hard + soft))
+    # Include alternatives and preferred lines in the prompt even though they
+    # cannot independently trigger the deterministic veto.
+    lines = list(dict.fromkeys(line.strip() for line in (text or '').splitlines() if _YEARS.search(line)))
     return '\n'.join(lines)[:limit]
 
 
 def guard(verdict: dict, title: str, text: str, years: float) -> dict:
-    """Code has the last word on a "yes": Eligible must be safe to apply to
-    without reading. Never upgrades a verdict; only "yes" can change."""
+    """Veto conflicting mandatory experience; retain likely matches otherwise.
+    Never upgrades a verdict; only "yes" can change."""
     if verdict.get('eligible') != 'yes':
         return verdict
     hard, soft = requirement_years(text)
