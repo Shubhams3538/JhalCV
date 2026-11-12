@@ -135,6 +135,8 @@ def validate_profile(profile):
     cap = locked.get('max_projects_on_page', 2)
     if type(cap) is not int or not 1 <= cap <= 5:
         raise ValueError('Project limit must be between 1 and 5.')
+    for item in array(locked.get('pinned_skills', []), 'Pinned skills', 100):
+        text(item, 'Pinned skill', 100, True)
     # The browser workflow always keeps these sections unchanged during tailoring.
     profile.setdefault('_locked', {})['frozen_sections'] = FROZEN[:]
     return profile

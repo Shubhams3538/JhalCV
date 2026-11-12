@@ -43,7 +43,7 @@ class CombinedTailorTests(unittest.TestCase):
         before = copy.deepcopy(self.profile)
         source, report, rewritten, notice = tailor_once(self.profile, JD, model='test-model')
         self.assertEqual(ask.call_count, 1)
-        self.assertEqual(ask.call_args.kwargs['schema_name'], 'tailored_resume_v1')
+        self.assertEqual(ask.call_args.kwargs['schema_name'], 'tailored_resume_v2')
         self.assertEqual(report['llm']['request_count'], 1)
         self.assertNotIn('kafka', report['gap_skills'])
         self.assertEqual(report['tailorer'], 'llm')

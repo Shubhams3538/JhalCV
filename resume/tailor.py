@@ -146,6 +146,70 @@ MIN_SHIPPED_BULLETS = 2
 MAX_SKILLS_PER_GROUP = 9
 
 
+def printed_skills(ordered: list, pinned_names: list = ()) -> list:
+    """The printed part of a group. A pinned skill is never cut by the cap."""
+    from .insights import canonical  # insights imports storage, which imports this module
+    pinned = {canonical(name) for name in pinned_names}
+    printed = ordered[:MAX_SKILLS_PER_GROUP]
+    for skill in ordered[MAX_SKILLS_PER_GROUP:]:
+        if canonical(skill) not in pinned:
+            continue
+        spare = [i for i, item in enumerate(printed) if canonical(item) not in pinned]
+        if spare:
+            printed[spare[-1]] = skill
+    return printed
+
+
+def term_weights(matched=(), keywords=()) -> dict:
+    """Job terms keyed by canonical name, as (spelling, weight). Required terms count double."""
+    from .insights import canonical
+    weights = {}
+    for term in matched:
+        weights.setdefault(canonical(term), (term, 1))
+    for item in keywords:
+        weight = 2 if item.get("importance") == "required" else 1
+        key = canonical(item["term"])
+        weights[key] = (item["term"], max(weight, weights.get(key, ("", 0))[1]))
+    return weights
+
+
+def covered_terms(project: dict, terms: dict) -> set:
+    """Job terms a project proves through its stack or its bullet text."""
+    from .insights import canonical
+    stack = {canonical(tech) for tech in project.get("stack", [])}
+    text = " " + " ".join(b["text"].replace("**", "") for b in project["bullets"]).lower() + " "
+    return {key for key, (term, _) in terms.items() if key in stack or _term_present(term, text)}
+
+
+def diversify(ranked: list, terms: dict, count: int) -> tuple[list, list]:
+    """Take projects in rank order, except where a later slot can prove more of the job.
+
+    The top pick always stays. For every later slot, a lower-ranked project
+    replaces the ranked one only when it proves strictly more job terms that the
+    projects already chosen do not, so two projects never repeat one stack while
+    other requirements go unshown.
+    """
+    coverage = [covered_terms(project, terms) for project in ranked]
+    pool = list(range(len(ranked)))
+    chosen, swaps, covered = [], [], set()
+
+    def gain(index):
+        return sum(terms[key][1] for key in coverage[index] - covered)
+
+    while pool and len(chosen) < count:
+        pick = pool[0]
+        if chosen:
+            best = max(pool, key=gain)  # ties keep the higher-ranked project
+            if gain(best) > gain(pick):
+                swaps.append({"instead_of": ranked[pick], "chosen": ranked[best],
+                              "adds": sorted(terms[key][0] for key in coverage[best] - covered)})
+                pick = best
+        chosen.append(ranked[pick])
+        pool.remove(pick)
+        covered |= coverage[pick]
+    return chosen, swaps
+
+
 def renderable(profile: dict) -> dict:
     """Strip anything not yet true from the profile before any tailorer sees it.
 
@@ -260,7 +324,11 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
         key=lambda p: -p["_score"],
     )
     projects = []
-    for p in ranked[:max_projects]:
+    selected, swaps = diversify(ranked, term_weights(jd["matched_skills"]), max_projects)
+    for swap in swaps:
+        report["decisions"].append({"section": "projects", "chosen": swap["chosen"]["name"],
+                                    "instead_of": swap["instead_of"]["name"], "adds": swap["adds"]})
+    for p in selected:
         angle = _pick_angle(p, jd)
         pb = sorted(
             ({**b, "_score": _score_bullet(b, jd)} for b in p["bullets"]),
@@ -284,17 +352,18 @@ def tailor(profile: dict, jd_text: str, *, max_projects: int = 2,
         })
     report["decisions"].append({
         "section": "projects", "not_selected":
-            [{"name": p["name"], "score": p["_score"]} for p in ranked[max_projects:]],
+            [{"name": p["name"], "score": p["_score"]} for p in ranked if all(p is not s for s in selected)],
     })
 
     # ── skills: reorder within groups so JD-matched terms come first ─────────
     skills = []
+    pinned = profile.get("_locked", {}).get("pinned_skills", [])
     for label, items in profile["skills"].items():
         if label.startswith("_") or not isinstance(items, list):
             continue
         hits = [s for s in items if s in jd["matched_skills"]]
         rest = [s for s in items if s not in jd["matched_skills"]]
-        skills.append({"label": label, "items": (hits + rest)[:MAX_SKILLS_PER_GROUP], "_matched": hits})
+        skills.append({"label": label, "items": printed_skills(hits + rest, pinned), "_matched": hits})
 
     resume_data = {
         "basics": profile["basics"],

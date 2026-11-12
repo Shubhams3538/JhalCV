@@ -17,7 +17,7 @@ const $ = selector => {
 };
 let description = 'Build reliable Python backend services and REST APIs with database integrations.';
 const context = { $, state: {example: false}, draft: null, jobsTab: 'eligible',
-  window: {scrollY: 100, scrollTo() {}}, Event: class {},
+  URL, window: {scrollY: 100, scrollTo() {}, open(...args) {calls.push({open: args})}}, Event: class {},
   api: async (path, body) => {calls.push({path, body});
     if (path === 'jobs/detail') return {title: 'Engineer', company: 'Acme', location: 'India', description};
     if (path === 'jobs/status') return {};
@@ -35,6 +35,7 @@ vm.runInContext(source.slice(source.indexOf('async function createDraft('), sour
   const job = {id: 1, title: 'Engineer', company: 'Acme', url: 'https://example.com/job', status: 'new'};
   await context.tailorForJob(job);
   assert.equal(calls.filter(c => c.path === 'tailor').length, 1);
+  assert.deepStrictEqual(calls[0].open, ['https://example.com/job', '_blank', 'noopener,noreferrer']);
   const request = calls.find(c => c.path === 'tailor');
   assert.deepStrictEqual(Object.keys(request.body), ['jd']);
   assert(request.body.jd.includes(description));
@@ -45,6 +46,10 @@ vm.runInContext(source.slice(source.indexOf('async function createDraft('), sour
   description = '';
   await assert.rejects(() => context.tailorForJob(job), /no description/);
   assert.equal(calls.filter(c => c.path === 'tailor').length, 1);
+  const opened = calls.filter(c => c.open).length;
+  description = 'Build reliable Python backend services.';
+  await context.tailorForJob({...job, url: 'javascript:alert(1)'});
+  assert.equal(calls.filter(c => c.open).length, opened);
 })().catch(e => {console.error(e); process.exitCode = 1});
 """
         source = Path(__file__).resolve().parents[1] / 'web' / 'app.js'

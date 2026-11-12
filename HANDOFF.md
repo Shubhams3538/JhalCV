@@ -27,6 +27,12 @@ The user wants implementation without code walkthroughs. Read `AGENTS.local.md`;
 - Heading rows (company/city, role/dates, project/GitHub) render as one text line, so parsers no longer attach a city or link to the previous entry.
 - Unexpected server errors print a traceback to the terminal; the browser still gets the generic message. The user reported that message once; the cause is not yet identified.
 
+## Job skill swap (November 2, 2026)
+
+- The combined AI request also returns `jd_keywords`. `resume/skill_swap.py` keeps only terms literally in the JD and adds them to existing skill groups, never new ones. Skills may be added even if the profile lacks them, by the user's decision; they are not saved to the profile.
+- `_locked.pinned_skills` (Profile > Skills, "Never remove these skills") and every skill the job names are never removed. Saved skills the job does not mention are removed only when the page needs room.
+- `workspace.fit_skills` runs after the layout is final, so skills can never cost a bullet or change typography. If they cannot fit or verify, the saved skills are kept. The result is in `resume.report.json` as `skill_swap` and in the preview notices. Web flow only; the CLI is unchanged.
+
 ## Jobs collector (branch `jobs`, in progress)
 
 - October 25 CSV import: Jobs supports UTF-8 `company,url` files (also name/link headers), preview and row selection, 500 rows/500 KB, atomic insertion and duplicate name/canonical URL skipping. India defaults for imported sources. Import never auto-refreshes. The user's 145-company workbook was audited; 76 URLs refined. Deliverables are ignored `build/company-import/india_145_companies.csv` and `portal_link_audit.csv`; 15 portals remain blocked or unverified, listed in the audit. No bulk import was performed in the user's database.
