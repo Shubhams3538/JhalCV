@@ -58,7 +58,6 @@ func TestSettingsKeepsDefaultsForMissingFields(t *testing.T) {
 	}
 }
 
-
 func TestSettingsRejectsBadValues(t *testing.T) {
 	tests := []struct {
 		name    string

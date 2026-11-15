@@ -13,7 +13,6 @@ const (
 	contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'none'; frame-ancestors 'self'"
 )
 
-
 // newRouter maps each URL the browser may request to the code that answers it.
 func newRouter(webDir string) http.Handler {
 	mux := http.NewServeMux()
