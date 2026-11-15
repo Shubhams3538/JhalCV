@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"jhalcv/internal/app"
 )
 
 const (
@@ -14,7 +17,7 @@ const (
 )
 
 // newRouter maps each URL the browser may request to the code that answers it.
-func newRouter(webDir string) http.Handler {
+func newRouter(webDir string, a *app.App) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", serveFile(webDir, "index.html", "text/html; charset=utf-8"))
@@ -22,6 +25,16 @@ func newRouter(webDir string) http.Handler {
 	mux.HandleFunc("GET /theme.js", serveFile(webDir, "theme.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /onboarding.js", serveFile(webDir, "onboarding.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /style.css", serveFile(webDir, "style.css", "text/css; charset=utf-8"))
+
+	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
+		state, err := a.State()
+		if err != nil {
+			log.Printf("GET /api/state: %v", err)
+			replyError(w, http.StatusInternalServerError, "Could not load your workspace. Check the terminal for details.")
+			return
+		}
+		replyJSON(w, http.StatusOK, state)
+	})
 
 	// Anything not matched above.
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +75,17 @@ func reply(w http.ResponseWriter, status int, contentType string, body []byte) {
 func replyError(w http.ResponseWriter, status int, message string) {
 	// Encoding a map of strings cannot fail, so the error is ignored.
 	body, _ := json.Marshal(map[string]string{"error": message})
+	reply(w, status, contentTypeJSON, body)
+}
+
+// replyJSON sends any Go value encoded as JSON.
+func replyJSON(w http.ResponseWriter, status int, value any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		log.Printf("encode response: %v", err)
+		replyError(w, http.StatusInternalServerError, "Could not prepare the response.")
+		return
+	}
 	reply(w, status, contentTypeJSON, body)
 }
 

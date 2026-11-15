@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"syscall"
 	"time"
+
+	"jhalcv/internal/app"
 )
 
 func main() {
@@ -22,6 +24,15 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Print the URL without opening a browser")
 	root := flag.String("root", "..", "Folder that holds web/, templates/ and data/ (the Python project)")
 	flag.Parse()
+
+	// Settings store full paths (e.g. the PDF output folder), so turn ".."
+	// into a full path like /Users/you/.../runtime_resume_maker first.
+	projectRoot, err := filepath.Abs(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not find the project folder: %v\n", err)
+		os.Exit(1)
+	}
+	workspace := app.New(projectRoot)
 
 	// ctx is "cancelled" when the user presses Ctrl+C (SIGINT) or the OS asks
 	// the program to stop (SIGTERM). Set up first so no early Ctrl+C is missed.
@@ -37,7 +48,7 @@ func main() {
 	url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 
 	server := &http.Server{
-		Handler:           requireLocalHost(actualPort, newRouter(filepath.Join(*root, "web"))),
+		Handler:           requireLocalHost(actualPort, newRouter(filepath.Join(projectRoot, "web"), workspace)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
