@@ -22,6 +22,16 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func newApp(t *testing.T, root string) *App {
+	t.Helper()
+	a, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close() })
+	return a
+}
+
 func exampleProfile(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(exampleProfilePath)
@@ -35,7 +45,7 @@ func TestStateFallsBackToExampleProfile(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "profile.example.json"), exampleProfile(t))
 
-	state, err := New(root).State()
+	state, err := newApp(t, root).State()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +63,7 @@ func TestStateFallsBackToExampleProfile(t *testing.T) {
 func TestStateRevisionFollowsProfileChanges(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "profile.json")
-	a := New(root)
+	a := newApp(t, root)
 
 	writeFile(t, path, exampleProfile(t))
 	first, err := a.State()
@@ -78,7 +88,7 @@ func TestStateReportsAnInvalidProfileToTheUser(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "profile.json"), `{"basics": {"name": ""}}`)
 
-	_, err := New(root).State()
+	_, err := newApp(t, root).State()
 	if msg, ok := usererr.Message(err); !ok || !strings.Contains(msg, "name: enter text") {
 		t.Errorf("error = %v, want a user-facing message about the missing name", err)
 	}
@@ -86,7 +96,7 @@ func TestStateReportsAnInvalidProfileToTheUser(t *testing.T) {
 
 func TestEachAppGetsItsOwnToken(t *testing.T) {
 	root := t.TempDir()
-	one, two := New(root).token, New(root).token
+	one, two := newApp(t, root).Token(), newApp(t, root).Token()
 	if one == "" || one == two {
 		t.Errorf("tokens %q and %q, want two different non-empty secrets", one, two)
 	}

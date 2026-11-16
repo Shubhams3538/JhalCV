@@ -11,7 +11,7 @@ import (
 // removed, like text() in resume/storage.py.
 func text(value, label string, limit int, required bool) (string, error) {
 	if utf8.RuneCountInString(value) > limit || (required && strings.TrimSpace(value) == "") {
-		return "", usererr.Errorf("%s: enter text (maximum %d characters).", label, limit)
+		return "", textError(label, limit)
 	}
 	for _, r := range value {
 		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
@@ -19,4 +19,8 @@ func text(value, label string, limit int, required bool) (string, error) {
 		}
 	}
 	return strings.TrimSpace(value), nil
+}
+
+func textError(label string, limit int) error {
+	return usererr.Errorf("%s: enter text (maximum %d characters).", label, limit)
 }
