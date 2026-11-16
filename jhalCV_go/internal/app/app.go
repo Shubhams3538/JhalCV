@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os/exec"
 
 	"jhalcv/internal/storage"
@@ -29,7 +28,7 @@ func New(root string) *App {
 
 // State is everything the page needs when it first loads (GET /api/state).
 type State struct {
-	Profile         json.RawMessage  `json:"profile"`
+	Profile         *storage.Profile `json:"profile"`
 	Settings        storage.Settings `json:"settings"`
 	Example         bool             `json:"example"`
 	ProfileRevision string           `json:"profile_revision"`
@@ -39,7 +38,12 @@ type State struct {
 
 // State gathers the page's starting data.
 func (a *App) State() (State, error) {
-	profile, example, err := a.store.ProfileJSON()
+	// Read the file once, so the profile and its revision always match.
+	data, example, err := a.store.ProfileFile()
+	if err != nil {
+		return State{}, err
+	}
+	profile, err := storage.ParseProfile(data)
 	if err != nil {
 		return State{}, err
 	}
@@ -50,7 +54,7 @@ func (a *App) State() (State, error) {
 
 	rev := ""
 	if !example {
-		rev = revision(profile)
+		rev = revision(data)
 	}
 
 	return State{

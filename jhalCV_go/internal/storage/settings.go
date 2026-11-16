@@ -5,12 +5,13 @@ package storage
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"jhalcv/internal/usererr"
 )
 
 // Settings are the user's resume-output preferences, saved in .local/settings.json.
@@ -52,7 +53,7 @@ func (s *Store) Settings() (Settings, error) {
 		return Settings{}, err
 	default:
 		if err := json.Unmarshal(data, &settings); err != nil {
-			return Settings{}, fmt.Errorf("read %s: %w", s.settingsPath(), err)
+			return Settings{}, usererr.Errorf("Settings file %s is not valid JSON: %v", s.settingsPath(), err)
 		}
 	}
 
@@ -69,7 +70,7 @@ func (s *Store) validateSettings(v Settings) (Settings, error) {
 		return Settings{}, err
 	}
 	if !filenamePattern.MatchString(filename) {
-		return Settings{}, errors.New("Filename: use letters, numbers, spaces, hyphens or underscores; omit .pdf.")
+		return Settings{}, usererr.New("Filename: use letters, numbers, spaces, hyphens or underscores; omit .pdf.")
 	}
 
 	folder, err := text(v.OutputDir, "Output folder", 2000, true)
@@ -85,7 +86,7 @@ func (s *Store) validateSettings(v Settings) (Settings, error) {
 	}
 
 	if v.Tailorer != "auto" && v.Tailorer != "rules" {
-		return Settings{}, errors.New("Choose auto or rules tailoring.")
+		return Settings{}, usererr.New("Choose auto or rules tailoring.")
 	}
 
 	model, err := text(v.Model, "Model", 100, true)

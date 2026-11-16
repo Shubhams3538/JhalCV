@@ -3,8 +3,14 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"jhalcv/internal/usererr"
 )
+
+// The sample profile shipped with the Python app, shared by both versions.
+const exampleProfilePath = "../../../profile.example.json"
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
@@ -16,9 +22,18 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func exampleProfile(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(exampleProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestStateFallsBackToExampleProfile(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "profile.example.json"), `{"basics": {"name": "Ada"}}`)
+	writeFile(t, filepath.Join(root, "profile.example.json"), exampleProfile(t))
 
 	state, err := New(root).State()
 	if err != nil {
@@ -30,8 +45,8 @@ func TestStateFallsBackToExampleProfile(t *testing.T) {
 	if state.ProfileRevision != "" {
 		t.Errorf("ProfileRevision = %q, want empty for the example profile", state.ProfileRevision)
 	}
-	if string(state.Profile) != `{"basics": {"name": "Ada"}}` {
-		t.Errorf("Profile = %s, want the example file unchanged", state.Profile)
+	if state.Profile.Basics.Name != "Ada Lovelace" {
+		t.Errorf("Basics.Name = %q, want the example profile's name", state.Profile.Basics.Name)
 	}
 }
 
@@ -40,22 +55,32 @@ func TestStateRevisionFollowsProfileChanges(t *testing.T) {
 	path := filepath.Join(root, "profile.json")
 	a := New(root)
 
-	writeFile(t, path, `{"version": 1}`)
+	writeFile(t, path, exampleProfile(t))
 	first, err := a.State()
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, path, `{"version": 2}`)
+	writeFile(t, path, strings.Replace(exampleProfile(t), "Ada Lovelace", "Ada Byron", 1))
 	second, err := a.State()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(first.ProfileRevision) != 16 {
-		t.Errorf("revision %q, want 16 characters", first.ProfileRevision)
+	if first.Example || len(first.ProfileRevision) != 16 {
+		t.Errorf("revision %q (example %v), want 16 characters for a saved profile", first.ProfileRevision, first.Example)
 	}
 	if first.ProfileRevision == second.ProfileRevision {
 		t.Error("revision did not change after the profile changed")
+	}
+}
+
+func TestStateReportsAnInvalidProfileToTheUser(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "profile.json"), `{"basics": {"name": ""}}`)
+
+	_, err := New(root).State()
+	if msg, ok := usererr.Message(err); !ok || !strings.Contains(msg, "name: enter text") {
+		t.Errorf("error = %v, want a user-facing message about the missing name", err)
 	}
 }
 

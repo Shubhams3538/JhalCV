@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"jhalcv/internal/app"
+	"jhalcv/internal/usererr"
 )
 
 const (
@@ -26,11 +27,10 @@ func newRouter(webDir string, a *app.App) http.Handler {
 	mux.HandleFunc("GET /onboarding.js", serveFile(webDir, "onboarding.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /style.css", serveFile(webDir, "style.css", "text/css; charset=utf-8"))
 
-	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		state, err := a.State()
 		if err != nil {
-			log.Printf("GET /api/state: %v", err)
-			replyError(w, http.StatusInternalServerError, "Could not load your workspace. Check the terminal for details.")
+			replyFailure(w, r, err)
 			return
 		}
 		replyJSON(w, http.StatusOK, state)
@@ -76,6 +76,18 @@ func replyError(w http.ResponseWriter, status int, message string) {
 	// Encoding a map of strings cannot fail, so the error is ignored.
 	body, _ := json.Marshal(map[string]string{"error": message})
 	reply(w, status, contentTypeJSON, body)
+}
+
+// replyFailure tells the browser an operation failed. A user-facing error is
+// shown as is (400). Anything else is logged here and replaced with a generic
+// message (500), so file paths and other internals never reach the page.
+func replyFailure(w http.ResponseWriter, r *http.Request, err error) {
+	if msg, ok := usererr.Message(err); ok {
+		replyError(w, http.StatusBadRequest, msg)
+		return
+	}
+	log.Printf("%s %s: %v", r.Method, r.URL.Path, err)
+	replyError(w, http.StatusInternalServerError, "The operation failed. Your saved profile is unchanged. Check your tools and settings and retry.")
 }
 
 // replyJSON sends any Go value encoded as JSON.
