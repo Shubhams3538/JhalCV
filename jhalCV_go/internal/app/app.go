@@ -15,6 +15,7 @@ import (
 
 	"jhalcv/internal/credentials"
 	"jhalcv/internal/llm"
+	"jhalcv/internal/resume"
 	"jhalcv/internal/storage"
 	"jhalcv/internal/timing"
 	"jhalcv/internal/usage"
@@ -28,6 +29,11 @@ type App struct {
 	Credentials *credentials.Store
 	Usage       *usage.Store
 	Timing      *timing.Tailoring
+	Insights    *resume.Insights
+	Renderer    *resume.Renderer
+
+	drafts    drafts
+	tailoring sync.Mutex // One tailoring run at a time.
 
 	// Mu serializes changes to saved files, like the Python app's lock.
 	Mu    sync.Mutex
@@ -47,6 +53,8 @@ func New(root string) (*App, error) {
 		Credentials: credentials.New(root, true),
 		Usage:       ledger,
 		Timing:      timing.New(),
+		Insights:    resume.NewInsights(root),
+		Renderer:    resume.NewRenderer(root),
 		token:       rand.Text(),
 	}, nil
 }

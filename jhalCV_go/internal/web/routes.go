@@ -19,6 +19,21 @@ func (s *Server) getRoutes() {
 	s.get("/api/tailor/progress", http.StatusBadRequest, func(*http.Request) (any, error) {
 		return a.Timing.Snapshot(), nil
 	})
+	s.get("/api/insights", http.StatusBadRequest, func(*http.Request) (any, error) {
+		a.Mu.Lock()
+		defer a.Mu.Unlock()
+		return a.InsightsSummary()
+	})
+	s.mux.HandleFunc("GET /api/pdf/{id}/{revision}", func(w http.ResponseWriter, r *http.Request) {
+		a.Mu.Lock()
+		pdf, err := a.PreviewPDF(r.PathValue("id"), r.PathValue("revision"))
+		a.Mu.Unlock()
+		if err != nil {
+			replyFailure(w, r, err, http.StatusNotFound)
+			return
+		}
+		reply(w, http.StatusOK, "application/pdf", pdf)
+	})
 	s.get("/api/usage", http.StatusServiceUnavailable, func(*http.Request) (any, error) {
 		summary, err := a.Usage.Summary()
 		if err != nil {
@@ -46,6 +61,29 @@ func (s *Server) postRoutes() {
 	s.post("/api/usage/settings", true, func(_ *http.Request, body map[string]any, _ []byte) (any, error) {
 		return a.Usage.SetReference(body["model"])
 	})
+	s.post("/api/tailor", false, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.Tailor(r.Context(), body)
+	})
+	s.post("/api/preview", true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.Preview(r.Context(), body)
+	})
+	s.post("/api/export", true, func(_ *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.Export(body)
+	})
+	s.post("/api/drafts/swap", true, func(_ *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.SwapProject(body)
+	})
+	s.post("/api/import", true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.ImportProject(r.Context(), body)
+	})
+	s.post("/api/folder", true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.ChooseFolder(r.Context(), body)
+	})
+	for _, action := range []string{"add", "hide", "unhide", "reset"} {
+		s.post("/api/insights/"+action, true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+			return a.InsightAction(strings.TrimPrefix(r.URL.Path, "/api/insights/"), body)
+		})
+	}
 	for _, action := range []string{"add", "remove", "prefer", "model", "reminder"} {
 		s.post("/api/keys/"+action, true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
 			return a.KeyAction(strings.TrimPrefix(r.URL.Path, "/api/keys/"), body)
