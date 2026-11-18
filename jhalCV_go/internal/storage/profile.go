@@ -28,11 +28,11 @@ type Profile struct {
 // Locked holds resume rules that tailoring must respect.
 type Locked struct {
 	Note           string   `json:"note,omitempty"`
-	FrozenSections []string `json:"frozen_sections"`
+	FrozenSections []string `json:"frozen_sections,omitzero"`
 	// The pointers below are nil when the setting is not saved, which is
 	// different from a saved 0 (an invalid value the user should hear about).
 	MaxProjectsOnPage *int     `json:"max_projects_on_page,omitempty"`
-	PinnedSkills      []string `json:"pinned_skills,omitempty"`
+	PinnedSkills      []string `json:"pinned_skills,omitzero"`
 	MinProjectBullets *int     `json:"min_project_bullets,omitempty"`
 }
 
@@ -41,7 +41,7 @@ type Basics struct {
 	Name  string `json:"name"`
 	Phone string `json:"phone"`
 	Email string `json:"email"`
-	Links []Link `json:"links,omitempty"`
+	Links []Link `json:"links,omitzero"`
 }
 
 // Link is a labelled web address, such as "GitHub" and its URL.
@@ -59,8 +59,8 @@ type Experience struct {
 	Start      string   `json:"start"`
 	End        string   `json:"end"`
 	Link       *Link    `json:"link,omitempty"`
-	Stack      []string `json:"stack,omitempty"`
-	Angles     []string `json:"angles,omitempty"`
+	Stack      []string `json:"stack,omitzero"`
+	Angles     []string `json:"angles,omitzero"`
 	Bullets    []Bullet `json:"bullets"`
 	MaxBullets *int     `json:"max_bullets,omitempty"`
 }
@@ -69,10 +69,10 @@ type Experience struct {
 type Project struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
-	Stack      []string          `json:"stack,omitempty"`
+	Stack      []string          `json:"stack,omitzero"`
 	Link       *Link             `json:"link,omitempty"`
-	Angles     []string          `json:"angles,omitempty"`
-	Taglines   map[string]string `json:"taglines,omitempty"`
+	Angles     []string          `json:"angles,omitzero"`
+	Taglines   map[string]string `json:"taglines,omitzero"`
 	Bullets    []Bullet          `json:"bullets"`
 	MaxBullets *int              `json:"max_bullets,omitempty"`
 	Readme     string            `json:"_readme,omitempty"`
@@ -82,7 +82,7 @@ type Project struct {
 type Bullet struct {
 	ID     string   `json:"id"`
 	Status string   `json:"status,omitempty"` // "shipped" (the default) or "planned"
-	Angles []string `json:"angles,omitempty"`
+	Angles []string `json:"angles,omitzero"`
 	Text   string   `json:"text"`
 	// NeedsVerification is a private note about a claim the user still has to
 	// confirm. It is never printed on the resume.

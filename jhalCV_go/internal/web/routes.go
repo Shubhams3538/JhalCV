@@ -34,6 +34,25 @@ func (s *Server) getRoutes() {
 		}
 		reply(w, http.StatusOK, "application/pdf", pdf)
 	})
+	s.get("/api/jobs", http.StatusBadRequest, func(r *http.Request) (any, error) {
+		return a.JobsState(r.Context(), false)
+	})
+	s.get("/api/jobs/test", http.StatusBadRequest, func(r *http.Request) (any, error) {
+		return a.JobsState(r.Context(), true)
+	})
+	s.get("/api/jobs/progress", http.StatusBadRequest, func(*http.Request) (any, error) {
+		return a.JobsProgress(), nil
+	})
+	s.get("/api/benchmarks", http.StatusBadRequest, func(r *http.Request) (any, error) {
+		report, err := a.Jobs.Benchmarks.Report(r.URL.Query().Get("run"))
+		if err != nil {
+			if _, ok := usererr.Message(err); ok {
+				return nil, err
+			}
+			return nil, usererr.New("Timing reports are currently unavailable.")
+		}
+		return report, nil
+	})
 	s.get("/api/usage", http.StatusServiceUnavailable, func(*http.Request) (any, error) {
 		summary, err := a.Usage.Summary()
 		if err != nil {
@@ -79,6 +98,23 @@ func (s *Server) postRoutes() {
 	s.post("/api/folder", true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
 		return a.ChooseFolder(r.Context(), body)
 	})
+	// Structuring calls an AI and can take a while, so it does not hold the
+	// App lock, like the Python app.
+	s.post("/api/setup/structure", false, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+		return a.StructureResume(r.Context(), body)
+	})
+	for _, action := range []string{"extract", "test-ai", "check", "complete"} {
+		s.post("/api/setup/"+action, true, func(r *http.Request, body map[string]any, raw []byte) (any, error) {
+			return a.SetupAction(r.Context(), strings.TrimPrefix(r.URL.Path, "/api/setup/"), body, raw)
+		})
+	}
+	for _, action := range []string{"detail", "sources/add", "sources/preview", "sources/import", "sources/url",
+		"sources/locations", "sources/remove", "refresh", "recheck", "review", "delete-all", "delete", "status",
+		"eligibility", "experience"} {
+		s.post("/api/jobs/"+action, true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
+			return a.JobsAction(r.Context(), strings.TrimPrefix(r.URL.Path, "/api/jobs/"), body)
+		})
+	}
 	for _, action := range []string{"add", "hide", "unhide", "reset"} {
 		s.post("/api/insights/"+action, true, func(r *http.Request, body map[string]any, _ []byte) (any, error) {
 			return a.InsightAction(strings.TrimPrefix(r.URL.Path, "/api/insights/"), body)

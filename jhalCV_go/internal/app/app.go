@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"jhalcv/internal/credentials"
+	"jhalcv/internal/jobs"
 	"jhalcv/internal/llm"
 	"jhalcv/internal/resume"
 	"jhalcv/internal/storage"
@@ -31,8 +32,11 @@ type App struct {
 	Timing      *timing.Tailoring
 	Insights    *resume.Insights
 	Renderer    *resume.Renderer
+	Jobs        *jobs.Service // The saved job collection.
+	JobsTest    *jobs.Service // The Test lab's scratch copy.
 
 	drafts    drafts
+	setup     setupChecks
 	tailoring sync.Mutex // One tailoring run at a time.
 
 	// Mu serializes changes to saved files, like the Python app's lock.
@@ -47,7 +51,7 @@ func New(root string) (*App, error) {
 		return nil, err
 	}
 	llm.ProjectRoot = root
-	return &App{
+	a := &App{
 		Root:        root,
 		Store:       storage.NewStore(root),
 		Credentials: credentials.New(root, true),
@@ -56,11 +60,24 @@ func New(root string) (*App, error) {
 		Insights:    resume.NewInsights(root),
 		Renderer:    resume.NewRenderer(root),
 		token:       rand.Text(),
-	}, nil
+	}
+	if a.Jobs, err = jobs.NewService(root, "jobs.db", ledger, a.newAsker); err != nil {
+		ledger.Close()
+		return nil, err
+	}
+	if a.JobsTest, err = jobs.NewService(root, "jobs.test.db", ledger, a.newAsker); err != nil {
+		a.Jobs.Store.Close()
+		ledger.Close()
+		return nil, err
+	}
+	return a, nil
 }
 
-// Close releases the databases.
+// Close releases the databases and stops any pooled browsers.
 func (a *App) Close() error {
+	jobs.CloseBrowsers()
+	a.Jobs.Store.Close()
+	a.JobsTest.Store.Close()
 	return a.Usage.Close()
 }
 
@@ -79,6 +96,7 @@ type State struct {
 	Credentials     *credentials.Public `json:"credentials"`
 	ProfileRevision string              `json:"profile_revision"`
 	Dependencies    map[string]bool     `json:"dependencies"`
+	Setup           *SetupStatus        `json:"setup"`
 	Token           string              `json:"token"`
 }
 
@@ -110,7 +128,12 @@ func (a *App) State() (*State, error) {
 	if !example {
 		rev = revision(data)
 	}
+	setup, err := a.SetupStatus(context.Background())
+	if err != nil {
+		return nil, err
+	}
 	return &State{
+		Setup:           setup,
 		Profile:         profile,
 		Settings:        settings,
 		Example:         example,

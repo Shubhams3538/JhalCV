@@ -24,6 +24,11 @@ func writeFile(t *testing.T, path, content string) {
 
 func newApp(t *testing.T, root string) *App {
 	t.Helper()
+	companies, err := os.ReadFile("../../../data/companies.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "data", "companies.json"), string(companies))
 	a, err := New(root)
 	if err != nil {
 		t.Fatal(err)

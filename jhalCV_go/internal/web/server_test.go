@@ -25,6 +25,16 @@ func newServer(t *testing.T) (http.Handler, *app.App) {
 	if err := os.WriteFile(filepath.Join(root, "profile.example.json"), example, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	companies, err := os.ReadFile("../../../data/companies.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "data", "companies.json"), companies, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	a, err := app.New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +75,7 @@ func TestStateShapeMatchesTheFrontend(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil || rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	for _, key := range []string{"profile", "settings", "example", "ai_available", "credentials", "profile_revision", "dependencies", "token"} {
+	for _, key := range []string{"profile", "settings", "example", "ai_available", "credentials", "profile_revision", "dependencies", "setup", "token"} {
 		if _, ok := state[key]; !ok {
 			t.Errorf("missing %q", key)
 		}
