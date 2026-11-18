@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -109,8 +110,9 @@ func pdfText(ctx context.Context, raw []byte) (string, []string, error) {
 	}
 	tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	err = exec.CommandContext(tctx, "pdftotext", "-f", "1", "-l", "10", "-layout", source, out).Run()
+	timedOut := errors.Is(tctx.Err(), context.DeadlineExceeded)
 	cancel()
-	if tctx.Err() != nil {
+	if timedOut {
 		return "", nil, usererr.New("PDF extraction timed out. Use a smaller file or enter details manually.")
 	}
 	info, statErr := os.Stat(out)
