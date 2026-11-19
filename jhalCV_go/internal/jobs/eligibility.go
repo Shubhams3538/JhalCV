@@ -561,3 +561,10 @@ func checkBatch(ctx context.Context, jobs []ReviewJob, years float64, agents Ask
 func isWord(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
+
+// RequirementYears exposes the year-requirement reader for benchmarks:
+// the counts it finds in hard and soft lines.
+func RequirementYears(posting string) (hard, soft int) {
+	h, s := requirementYears(posting)
+	return len(h), len(s)
+}

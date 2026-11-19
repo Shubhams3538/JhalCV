@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net"
 	"net/http"
@@ -493,117 +492,4 @@ func RenderPage(ctx context.Context, link string) (string, error) {
 		}
 		return page, nil
 	})
-}
-
-// ── HTML to text ──
-//
-// Scanning from every candidate start lets a crafted page pin a CPU, so
-// blocks, tags and anchors are removed in single forward passes.
-
-var (
-	blockOpen  = regexp.MustCompile(`(?i)<(script|style|noscript|svg|template)\b[^>]*>`)
-	blockClose = map[string]*regexp.Regexp{}
-	anchorOpen = regexp.MustCompile(`(?i)<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>`)
-	anchorEnd  = regexp.MustCompile(`(?i)</a\s*>`)
-	breaks     = regexp.MustCompile(`(?i)<\s*(br|/p|/div|/li|/h[1-6]|/tr|li)\b[^>]*>`)
-	tag        = regexp.MustCompile(`<[^>]+>`)
-)
-
-func init() {
-	for _, name := range []string{"script", "style", "noscript", "svg", "template"} {
-		blockClose[name] = regexp.MustCompile(`(?i)</` + name + `\s*>`)
-	}
-}
-
-func stripBlocks(value string) string {
-	var out strings.Builder
-	pos := 0
-	for _, m := range blockOpen.FindAllStringSubmatchIndex(value, -1) {
-		if m[0] < pos {
-			continue
-		}
-		loc := blockClose[strings.ToLower(value[m[2]:m[3]])].FindStringIndex(value[m[1]:])
-		if loc == nil {
-			continue // An element with no closing tag keeps its content.
-		}
-		out.WriteString(value[pos:m[0]])
-		pos = m[1] + loc[1]
-	}
-	out.WriteString(value[pos:])
-	return out.String()
-}
-
-func stripTags(value string) string {
-	last := strings.LastIndex(value, ">")
-	if last < 0 {
-		return value
-	}
-	return tag.ReplaceAllString(value[:last+1], " ") + value[last+1:]
-}
-
-// HTMLToText turns HTML into readable plain text, keeping line structure.
-func HTMLToText(value string) string {
-	if value == "" {
-		return ""
-	}
-	value = stripBlocks(value)
-	value = breaks.ReplaceAllString(value, "\n")
-	value = html.UnescapeString(stripTags(value))
-	var lines []string
-	for _, line := range splitLines(value) {
-		if line = strings.Join(strings.Fields(line), " "); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-// splitLines splits like Python's str.splitlines.
-func splitLines(s string) []string {
-	return strings.FieldsFunc(strings.ReplaceAll(s, "\r\n", "\n"), func(r rune) bool {
-		switch r {
-		case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', ' ', ' ':
-			return true
-		}
-		return false
-	})
-}
-
-// PageWithLinks is page text in which every link keeps its absolute URL, as
-// "[link: URL]", plus the set of those URLs.
-func PageWithLinks(value, base string) (string, map[string]bool) {
-	links := map[string]bool{}
-	baseURL, _ := url.Parse(base)
-	value = stripBlocks(value)
-	var out strings.Builder
-	pos := 0
-	for _, m := range anchorOpen.FindAllStringSubmatchIndex(value, -1) {
-		if m[0] < pos {
-			continue
-		}
-		loc := anchorEnd.FindStringIndex(value[m[1]:])
-		if loc == nil {
-			continue
-		}
-		href := strings.TrimSpace(html.UnescapeString(value[m[2]:m[3]]))
-		skip := false
-		for _, p := range []string{"#", "javascript:", "mailto:", "tel:", "data:"} {
-			if strings.HasPrefix(href, p) {
-				skip = true
-			}
-		}
-		if skip {
-			continue
-		}
-		absolute := href
-		if ref, err := url.Parse(href); err == nil && baseURL != nil {
-			absolute = baseURL.ResolveReference(ref).String()
-		}
-		links[absolute] = true
-		out.WriteString(value[pos:m[0]])
-		out.WriteString(value[m[1]:m[1]+loc[0]] + " [link: " + absolute + "] ")
-		pos = m[1] + loc[1]
-	}
-	out.WriteString(value[pos:])
-	return HTMLToText(out.String()), links
 }
