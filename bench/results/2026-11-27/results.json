@@ -1,0 +1,270 @@
+{
+  "machine": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "cpu": "arm",
+    "cores": 10,
+    "date": "2026-11-27T19:03:38"
+  },
+  "footprint": {
+    "python": {
+      "binary_mb": null,
+      "runtime": "Python 3.9.6 interpreter",
+      "files": 38,
+      "code_lines": 8591,
+      "test_lines": 5322,
+      "dependencies": "none (standard library)"
+    },
+    "go": {
+      "binary_mb": 19.210514,
+      "files": 58,
+      "code_lines": 17815,
+      "test_lines": 914,
+      "dependencies": "10 (github.com/dustin/go-humanize, github.com/google/uuid, github.com/mattn/go-isatty, github.com/ncruces/go-strftime, github.com/remyoudompheng/bigfft, golang.org/x/sys, modernc.org/libc, modernc.org/mathutil, modernc.org/memory, modernc.org/sqlite)",
+      "runtime": "none (self-contained binary)"
+    }
+  },
+  "micro": {
+    "python": {
+      "HTMLToText": {
+        "n": 5,
+        "mean": 3.299727956509808,
+        "median": 3.2827499999999996,
+        "min": 3.2342222179487177,
+        "max": 3.4247237534246575,
+        "stdev": 0.07343632169094105
+      },
+      "PageWithLinks": {
+        "n": 5,
+        "mean": 6.682718487529634,
+        "median": 6.6390811578947355,
+        "min": 6.572369666666662,
+        "max": 6.805209459459457,
+        "stdev": 0.10511955388460634
+      },
+      "ParseProfile": {
+        "n": 5,
+        "mean": 0.08280852947769875,
+        "median": 0.08288724991713613,
+        "min": 0.08129127373211956,
+        "max": 0.0835576204477113,
+        "stdev": 0.0009249508578744107
+      },
+      "ParseJD": {
+        "n": 5,
+        "mean": 2.1198838824858743,
+        "median": 2.1259922288135535,
+        "min": 2.087504166666665,
+        "max": 2.1316129915254223,
+        "stdev": 0.018285237286154037
+      },
+      "Tailor": {
+        "n": 5,
+        "mean": 2.256356756756756,
+        "median": 2.256176045045044,
+        "min": 2.2549774774774782,
+        "max": 2.257948576576574,
+        "stdev": 0.0012445646366692794
+      },
+      "RequirementYears": {
+        "n": 5,
+        "mean": 1.858639011851853,
+        "median": 1.857358333333339,
+        "min": 1.8537089481481501,
+        "max": 1.863158333333334,
+        "stdev": 0.003987150054754203
+      }
+    },
+    "go": {
+      "HTMLToText": {
+        "n": 5,
+        "mean": 1.0057166,
+        "median": 0.997684,
+        "min": 0.991608,
+        "max": 1.046214,
+        "stdev": 0.02289660762645853
+      },
+      "PageWithLinks": {
+        "n": 5,
+        "mean": 1.5292062,
+        "median": 1.526903,
+        "min": 1.521781,
+        "max": 1.54341,
+        "stdev": 0.008338275403223355
+      },
+      "ParseProfile": {
+        "n": 5,
+        "mean": 0.0140826,
+        "median": 0.014003,
+        "min": 0.013788,
+        "max": 0.014753,
+        "stdev": 0.0003878598973856413
+      },
+      "ParseJD": {
+        "n": 5,
+        "mean": 0.0787922,
+        "median": 0.077215,
+        "min": 0.076155,
+        "max": 0.087206,
+        "stdev": 0.004733141631094513
+      },
+      "Tailor": {
+        "n": 5,
+        "mean": 0.1064304,
+        "median": 0.10528,
+        "min": 0.104925,
+        "max": 0.111176,
+        "stdev": 0.0026635334238563615
+      },
+      "RequirementYears": {
+        "n": 5,
+        "mean": 1.7047804,
+        "median": 1.688925,
+        "min": 1.675913,
+        "max": 1.782417,
+        "stdev": 0.04396329761062058
+      }
+    }
+  },
+  "startup": {
+    "python": {
+      "seconds": {
+        "n": 15,
+        "mean": 0.07474298906666667,
+        "median": 0.059169542000000006,
+        "min": 0.057551417,
+        "max": 0.106265625,
+        "stdev": 0.02293032549110256
+      }
+    },
+    "go": {
+      "seconds": {
+        "n": 15,
+        "mean": 0.0129674084,
+        "median": 0.013051459000000001,
+        "min": 0.008569042,
+        "max": 0.019100333,
+        "stdev": 0.002662024739010241
+      }
+    }
+  },
+  "http": {
+    "python": {
+      "progress": {
+        "requests_per_second": 38689.059894533624,
+        "success_rate": 0.2092,
+        "p50_ms": 0.693209,
+        "p95_ms": 1.07025,
+        "p99_ms": 2.02825
+      },
+      "state": {
+        "requests_per_second": 122.13607413604738,
+        "success_rate": 0.999,
+        "p50_ms": 65.170667,
+        "p95_ms": 68.933875,
+        "p99_ms": 76.197
+      },
+      "jobs": {
+        "requests_per_second": 9.284587413129339,
+        "success_rate": 0.99,
+        "p50_ms": 881.026666,
+        "p95_ms": 935.16325,
+        "p99_ms": 948.073833
+      },
+      "memory_mb": {
+        "idle": 26.96875,
+        "after_load": 58.484375
+      }
+    },
+    "go": {
+      "progress": {
+        "requests_per_second": 79888.10297103536,
+        "success_rate": 1.0,
+        "p50_ms": 0.09704099999999999,
+        "p95_ms": 0.134417,
+        "p99_ms": 0.21000000000000002
+      },
+      "state": {
+        "requests_per_second": 999.4289932350082,
+        "success_rate": 1.0,
+        "p50_ms": 7.9330419999999995,
+        "p95_ms": 8.512541,
+        "p99_ms": 10.279833
+      },
+      "jobs": {
+        "requests_per_second": 147.95988895397272,
+        "success_rate": 1.0,
+        "p50_ms": 54.059416,
+        "p95_ms": 58.835333,
+        "p99_ms": 62.924167000000004
+      },
+      "memory_mb": {
+        "idle": 21.125,
+        "after_load": 102.765625
+      }
+    }
+  },
+  "tailor": {
+    "python": {
+      "requests_per_second": 109.69322958863596,
+      "success_rate": 1.0,
+      "p50_ms": 9.075958,
+      "p95_ms": 9.995792,
+      "p99_ms": 10.609625
+    },
+    "go": {
+      "requests_per_second": 357.2955582461459,
+      "success_rate": 1.0,
+      "p50_ms": 2.8087910000000003,
+      "p95_ms": 2.955417,
+      "p99_ms": 3.18075
+    }
+  },
+  "preview": {
+    "python": {
+      "seconds": {
+        "n": 7,
+        "mean": 0.5444704405714264,
+        "median": 0.5437226669999973,
+        "min": 0.5427624999999949,
+        "max": 0.5472453750000028,
+        "stdev": 0.0017392031704412238
+      }
+    },
+    "go": {
+      "seconds": {
+        "n": 7,
+        "mean": 0.5292100952857136,
+        "median": 0.528400041999987,
+        "min": 0.5272303330000057,
+        "max": 0.5333487919999982,
+        "stdev": 0.002174806987151459
+      }
+    }
+  },
+  "refresh": {
+    "python": {
+      "seconds": {
+        "n": 3,
+        "mean": 5.153985833333333,
+        "median": 5.119747625000002,
+        "min": 5.085907792,
+        "max": 5.256302082999994,
+        "stdev": 0.09020944952583973
+      },
+      "peak_mb": 161.734375,
+      "message": "100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules."
+    },
+    "go": {
+      "seconds": {
+        "n": 3,
+        "mean": 3.065829319333332,
+        "median": 3.237670707999996,
+        "min": 2.662671125000003,
+        "max": 3.2971461249999976,
+        "stdev": 0.35040937280617074
+      },
+      "peak_mb": 49.921875,
+      "message": "100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules."
+    }
+  }
+}
