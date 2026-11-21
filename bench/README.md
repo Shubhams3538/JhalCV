@@ -22,7 +22,7 @@ AI quota, and your real files are never written.
 | `http` | Throughput and p50/p95/p99 latency of a light, a medium and a heavy read endpoint, 8 concurrent clients; server memory | oha |
 | `tailor` | `POST /api/tailor` in rules mode, 200 sequential requests (the app allows one tailoring run at a time) | oha |
 | `preview` | Building a one-page PDF preview (mostly Typst and Poppler time) | timed loop |
-| `refresh` | A real refresh of three direct-feed companies; runs alternate between implementations so network drift affects both | timed loop |
+| `refresh` | A fresh refresh (empty job collection, no caches, like the Test lab) of the same 15 direct-feed companies from `data/companies.json`, one platform at a time; runs alternate between implementations so network drift affects both. `--refresh-companies N` changes the count | timed loop |
 | `micro` | Pure CPU work on the same inputs (`bench/fixtures.py`): HTML to text, profile validation, job analysis, tailoring, year requirements | Go `testing.B` / Python loop |
 | `footprint` | Binary size, runtime needed, lines of code and tests, dependencies | |
 

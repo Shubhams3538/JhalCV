@@ -53,9 +53,6 @@ IMPLEMENTATIONS = {
     },
 }
 
-# Direct-feed companies a refresh benchmark reads: real network, no AI.
-REFRESH_SOURCES = ['https://job-boards.eu.greenhouse.io/groww', 'https://jobs.lever.co/100ms',
-                   'https://adobe.wd5.myworkdayjobs.com/external_experienced?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e']
 JD = (ROOT / 'jds' / 'backend_systems.txt').read_text()
 
 
@@ -65,8 +62,30 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def make_workspace(parent: Path, name: str) -> Path:
-    """A private copy of everything the apps read, set to rules mode."""
+def refresh_companies(count: int) -> list[dict]:
+    """A fixed set of direct-feed companies from data/companies.json.
+
+    Taken one platform at a time (greenhouse, lever, workday, ...) so every
+    reader is exercised, in catalog order, so every implementation and every
+    run reads exactly the same companies. "page" companies are left out: they
+    need AI and Chrome, which would spend quota and mostly time the model.
+    """
+    catalog = json.loads((ROOT / 'data' / 'companies.json').read_text())
+    by_kind = {}
+    for company in catalog:
+        if company['kind'] != 'page':
+            by_kind.setdefault(company['kind'], []).append(company)
+    chosen, queues = [], [by_kind[k] for k in sorted(by_kind)]
+    while len(chosen) < count and any(queues):
+        for queue in queues:
+            if queue and len(chosen) < count:
+                chosen.append(queue.pop(0))
+    return chosen
+
+
+def make_workspace(parent: Path, name: str, *, fresh_jobs: bool = False) -> Path:
+    """A private copy of everything the apps read, set to rules mode. With
+    fresh_jobs the job collection starts empty, like the Test lab."""
     ws = parent / name
     if ws.exists():
         shutil.rmtree(ws)
@@ -79,7 +98,7 @@ def make_workspace(parent: Path, name: str) -> Path:
             shutil.copy2(src, ws / item)
     local = ws / '.local'
     local.mkdir()
-    for item in ('settings.json', 'jobs.db', 'insights.json'):
+    for item in ('settings.json', 'insights.json') if fresh_jobs else ('settings.json', 'jobs.db', 'insights.json'):
         if (ROOT / '.local' / item).exists():
             shutil.copy2(ROOT / '.local' / item, local / item)
     settings = json.loads((local / 'settings.json').read_text()) if (local / 'settings.json').exists() else {
@@ -233,15 +252,15 @@ def bench_preview(impl, tmp):
         server.stop()
 
 
-def run_refresh(impl, tmp, label):
-    ws = make_workspace(tmp, f'refresh-{impl}-{label}')
+def run_refresh(impl, tmp, label, companies):
+    # An empty collection and no answer caches: every job is new, so every
+    # listing and detail page is really fetched, like a Test lab run.
+    ws = make_workspace(tmp, f'refresh-{impl}-{label}', fresh_jobs=True)
     server = Server(impl, ws)
     try:
-        saved = {s['url'] for s in server.get('/api/jobs')['sources']}
-        for i, url in enumerate(REFRESH_SOURCES):  # A fresh workspace gets them from the catalog.
-            if url not in saved:
-                server.post('/api/jobs/sources/add', {'name': f'Bench {i + 1}', 'url': url})
-        ids = [s['id'] for s in server.get('/api/jobs')['sources'] if s['url'] in REFRESH_SOURCES]
+        for company in companies:
+            server.post('/api/jobs/sources/add', {'name': company['name'], 'url': company['url'], 'locations': 'India'})
+        ids = [s['id'] for s in server.get('/api/jobs')['sources']]
         start = time.perf_counter()
         server.post('/api/jobs/refresh', {'sources': ids})
         peak = server.rss_mb()
@@ -256,13 +275,15 @@ def run_refresh(impl, tmp, label):
         server.stop()
 
 
-def bench_refresh(impls, tmp, rounds=3):
-    """A real refresh of three direct-feed companies (network bound).
-    Implementations alternate each round so network drift hits both."""
+def bench_refresh(impls, tmp, rounds=3, count=15):
+    """A fresh refresh of the same `count` direct-feed companies (network
+    bound). Implementations alternate each round so network drift hits both."""
+    companies = refresh_companies(count)
+    print('    companies: ' + ', '.join(f"{c['name']} ({c['kind']})" for c in companies), flush=True)
     results = {impl: {'times': [], 'peak_mb': []} for impl in impls}
     for r in range(rounds):
         for impl in (impls if r % 2 == 0 else list(reversed(impls))):
-            seconds, peak, message = run_refresh(impl, tmp, str(r))
+            seconds, peak, message = run_refresh(impl, tmp, str(r), companies)
             results[impl]['times'].append(seconds)
             results[impl]['peak_mb'].append(peak)
             results[impl]['message'] = message
@@ -327,6 +348,7 @@ def main():
     parser.add_argument('--only', help='comma-separated groups: ' + ', '.join(GROUPS))
     parser.add_argument('--impl', default=','.join(IMPLEMENTATIONS), help='comma-separated implementations')
     parser.add_argument('--refresh-rounds', type=int, default=3)
+    parser.add_argument('--refresh-companies', type=int, default=15, help='companies a refresh run reads (default 15)')
     args = parser.parse_args()
     groups = args.only.split(',') if args.only else GROUPS
     impls = args.impl.split(',')
@@ -345,7 +367,7 @@ def main():
         for group in groups:
             print(f'▸ {group}', flush=True)
             if group == 'refresh':
-                results[group] = bench_refresh(impls, tmp, args.refresh_rounds)
+                results[group] = bench_refresh(impls, tmp, args.refresh_rounds, args.refresh_companies)
                 continue
             results[group] = {}
             for impl in impls:

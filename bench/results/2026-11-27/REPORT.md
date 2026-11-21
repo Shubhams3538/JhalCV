@@ -1,6 +1,6 @@
 # JhalCV benchmark: python vs go
 
-macOS-27.0.1-arm64-arm-64bit, 10 cores, run 2026-11-27T19:03:38. Every implementation used its own copy of the same workspace (real profile and job collection), in rules mode, so no AI calls are included.
+macOS-27.0.1-arm64-arm-64bit, 10 cores, run 2026-11-27T19:13:12. Every implementation used its own copy of the same workspace (real profile and job collection), in rules mode, so no AI calls are included.
 
 ### Cold start (launch → first HTTP response)
 
@@ -49,14 +49,14 @@ Dominated by Typst and Poppler (the same external tools for every implementation
 |---|---|---|---|
 | median | 0.54 s | 0.53 s | same |
 
-### Jobs refresh: 3 real companies
+### Jobs refresh: fresh run, same companies for each
 
-Network bound; implementations alternate each round. Summary: python: “100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules.”; go: “100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules.”
+Empty job collection and no caches, like a Test lab run; network bound; implementations alternate each round. Summary: python: “100ms, ACKO, Adobe, Airbnb, Akamai, Amazon, Amazon / AWS, Arista Networks, Bolna AI, ClickHouse, Google, Morgan Stanley, Nurix AI, Salesforce, AMD: 436 matching job(s), 393 new. 392 checked by text rules. could not read: AMD.”; go: “100ms, ACKO, Adobe, Airbnb, Akamai, Amazon, Amazon / AWS, Arista Networks, Bolna AI, ClickHouse, Google, Morgan Stanley, Nurix AI, Salesforce, AMD: 436 matching job(s), 393 new. 392 checked by text rules. could not read: AMD.”
 
 | | python | go | go vs python |
 |---|---|---|---|
-| median | 5.12 s | 3.24 s | 1.6× faster |
-| peak memory | 161.73 MB | 49.92 MB | 3.2× less |
+| median | 50.12 s | 33.50 s | 1.5× faster |
+| peak memory | 507.44 MB | 101.81 MB | 5.0× less |
 
 ### CPU micro benchmarks (median per call)
 

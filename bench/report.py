@@ -77,10 +77,10 @@ if 'preview' in results:
 
 if 'refresh' in results:
     r = results['refresh']
-    table('Jobs refresh: 3 real companies', 's',
+    table('Jobs refresh: fresh run, same companies for each', 's',
           [('median', {i: r[i]['seconds']['median'] for i in r}),
            ('peak memory', {i: r[i]['peak_mb'] for i in r}, 'MB', ('less', 'more'))],
-          note='Network bound; implementations alternate each round. Summary: ' +
+          note='Empty job collection and no caches, like a Test lab run; network bound; implementations alternate each round. Summary: ' +
                '; '.join(f'{i}: “{r[i]["message"]}”' for i in r))
 
 if 'micro' in results:

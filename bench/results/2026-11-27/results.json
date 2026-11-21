@@ -3,7 +3,7 @@
     "platform": "macOS-27.0.1-arm64-arm-64bit",
     "cpu": "arm",
     "cores": 10,
-    "date": "2026-11-27T19:03:38"
+    "date": "2026-11-27T19:13:12"
   },
   "footprint": {
     "python": {
@@ -245,26 +245,26 @@
     "python": {
       "seconds": {
         "n": 3,
-        "mean": 5.153985833333333,
-        "median": 5.119747625000002,
-        "min": 5.085907792,
-        "max": 5.256302082999994,
-        "stdev": 0.09020944952583973
+        "mean": 44.40559720833334,
+        "median": 50.122703625,
+        "min": 27.184268458,
+        "max": 55.90981954200001,
+        "stdev": 15.192211840429685
       },
-      "peak_mb": 161.734375,
-      "message": "100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules."
+      "peak_mb": 507.4375,
+      "message": "100ms, ACKO, Adobe, Airbnb, Akamai, Amazon, Amazon / AWS, Arista Networks, Bolna AI, ClickHouse, Google, Morgan Stanley, Nurix AI, Salesforce, AMD: 436 matching job(s), 393 new. 392 checked by text rules. could not read: AMD."
     },
     "go": {
       "seconds": {
         "n": 3,
-        "mean": 3.065829319333332,
-        "median": 3.237670707999996,
-        "min": 2.662671125000003,
-        "max": 3.2971461249999976,
-        "stdev": 0.35040937280617074
+        "mean": 28.285427333666664,
+        "median": 33.504933667,
+        "min": 14.683764666999991,
+        "max": 36.667583667,
+        "stdev": 11.885054027179283
       },
-      "peak_mb": 49.921875,
-      "message": "100ms, Adobe, Groww: 24 matching job(s), 4 new. 5 checked by text rules."
+      "peak_mb": 101.8125,
+      "message": "100ms, ACKO, Adobe, Airbnb, Akamai, Amazon, Amazon / AWS, Arista Networks, Bolna AI, ClickHouse, Google, Morgan Stanley, Nurix AI, Salesforce, AMD: 436 matching job(s), 393 new. 392 checked by text rules. could not read: AMD."
     }
   }
 }
