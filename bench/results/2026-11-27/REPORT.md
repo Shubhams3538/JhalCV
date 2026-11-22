@@ -1,6 +1,6 @@
 # JhalCV benchmark: python vs go
 
-macOS-27.0.1-arm64-arm-64bit, 10 cores, run 2026-11-27T19:13:12. Every implementation used its own copy of the same workspace (real profile and job collection), in rules mode, so no AI calls are included.
+macOS-27.0.1-arm64-arm-64bit, 10 cores, run 2026-11-27T19:18:47. Every implementation used its own copy of the same workspace (real profile and job collection), in rules mode, so no AI calls are included.
 
 ### Cold start (launch → first HTTP response)
 

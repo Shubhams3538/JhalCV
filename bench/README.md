@@ -5,9 +5,9 @@ next) on identical work.
 
 ```bash
 brew install hyperfine oha        # once
-python3 bench/run.py              # everything (about 5 minutes)
-python3 bench/run.py --only http,micro
-python3 bench/report.py bench/results/<date>/results.json
+make bench                        # everything, then prints the report
+make bench ARGS="--only http,micro"
+python3 bench/report.py bench/results/<date>/results.json   # reprint a saved report
 ```
 
 Each implementation runs against its own disposable copy of this workspace

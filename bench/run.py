@@ -9,7 +9,8 @@
 Each implementation runs against its own disposable copy of this workspace
 (your profile, settings and job collection), in rules mode, so nothing here
 spends AI quota or changes your real files. Results go to
-bench/results/<date>/results.json; bench/report.py turns them into a table.
+bench/results/<date>/results.json, and the comparison table is printed and
+saved as REPORT.md beside them.
 
 Adding the Rust port later only needs an entry in IMPLEMENTATIONS.
 """
@@ -383,7 +384,10 @@ def main():
             previous[key] = value if key == 'machine' else {**previous.get(key, {}), **value}
         results = previous
     path.write_text(json.dumps(results, indent=2))
-    print(f'\nSaved {path.relative_to(ROOT)}. Report: python3 bench/report.py {path.relative_to(ROOT)}')
+    # Write REPORT.md next to the results and print it, in the same run.
+    print()
+    subprocess.run([sys.executable, str(BENCH / 'report.py'), str(path)], check=True)
+    print(f'Saved {path.relative_to(ROOT)} and {(folder / "REPORT.md").relative_to(ROOT)}.')
 
 
 if __name__ == '__main__':
