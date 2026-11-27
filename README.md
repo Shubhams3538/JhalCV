@@ -27,6 +27,76 @@ The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
 Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
 URL yourself, use `python3 app.py --port 8765 --no-browser`.
 
+### First-time setup
+
+New workspaces open a five-step setup menu. Existing profiles and company lists
+are preserved; open **Settings → Run setup again** to review your current setup.
+
+1. Import a text-based **PDF or DOCX up to 1 MB**, or enter your profile manually.
+   Local extraction fills readable experience, education, project and skill
+   sections, plus contact details and GitHub/LinkedIn links (including hyperlink
+   targets hidden behind labels). Scanned PDFs need a text version or manual
+   entry. PDF extraction reads the first ten pages.
+2. Choose **Codex**, **Claude Code**, a supported API provider, automatic fallback,
+   or **rules only**. Installed CLIs are detected; a separate connection test
+   checks whether the selected provider can answer. That test consumes a small
+   amount of quota and sends no resume. API keys are saved immediately, locally.
+3. With an AI selected, **Fill profile from resume** automatically structures the
+   extracted text before opening the editable profile form. Rules mode uses local
+   suggestions. Confirm contact details, links, experience, education, skills,
+   projects and achievements; a checklist asks for missing details. GitHub and
+   LinkedIn fields are always visible and optional if unavailable. Missing
+   experience requires adding entries or explicitly confirming fresher status.
+   Experience years are suggested from employment dates and remain editable.
+   Resume text is sent to AI only by this explicit action. Every project needs
+   at least **three confirmed bullets**; missing claims must be supplied by you.
+4. Confirm professional experience (zero for freshers), target roles, excluded
+   titles, locations, output folder, filename, project count and companies.
+   New users receive the editable catalog in `data/companies.json` (147 companies).
+   Removing an existing company also removes its saved jobs on completion.
+5. Build and review the actual one-page PDF, confirm accuracy, then finish.
+   Setup checks PDF tools, folder write access, profile completeness and page fit.
+   Changing details requires a fresh preview. Saved profile text remains editable
+   afterwards; one-page checks still run on every resume export.
+
+The selected provider is shared by resume and job AI. Selecting a specific
+provider disables fallback to others; automatic mode permits fallback. Rules mode
+requires no subscription. **Gemini API** offers an account/model-dependent free
+tier; current terms are linked in setup. Gemini CLI and Antigravity are detected
+but their direct integrations are not enabled in this release. No subscription
+tokens are copied from those apps. Setup does not install software automatically.
+
+Unfinished form edits stay in the current tab until it is closed or refreshed.
+Only the final confirmation saves profile/preferences/companies; API-key additions
+are independent and persist even if setup is cancelled.
+
+### Try setup as a completely new user
+
+Run this from the project folder:
+
+```bash
+python3 test_app.py
+```
+
+This opens a separate app instance labelled **FRESH TEST**, with blank onboarding,
+empty jobs/settings/credentials/usage, the starter company catalog, and a temporary
+PDF output folder. Your real workspace and running app are kept separate. Every
+run starts fresh; **Ctrl+C** stops the test app and deletes its temporary data.
+Avoid selecting a personal output folder if you want exported PDFs discarded too.
+
+Your installed AI tools are still detected. Explicitly selecting/testing a CLI
+uses its real login and quota. Personal API keys, `.env`, profile, caches and job
+databases are not copied or inherited; keys added during this test are disposable.
+
+For a terminal-only automatic startup/isolation check that cleans up immediately:
+
+```bash
+python3 test_app.py --check
+```
+
+Use `--no-browser` to open the printed URL yourself, or `--port 8770` to choose a
+test port. You can keep multiple fresh test instances open at different ports.
+
 In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, Z.AI (GLM), or
 OpenRouter keys. A provider-specific model menu selects a default automatically;
 you can choose another named model or **Other model…** for a custom ID. Saved
@@ -392,7 +462,7 @@ The price snapshot was checked October 25, 2026 against the official [OpenAI](ht
 
 Company collection uses eight workers and a shared pool of twelve detail readers. Browser renders are limited to four and subscription AI calls to three. Direct feeds run before generic pages. Each company has a 150-second active-work budget; waiting for a browser/AI slot is excluded, and network/AI calls also have shorter timeouts. This is a bounded-work policy rather than a guaranteed wall-clock completion time.
 
-The Jobs page shows completed companies and currently active companies. Today's postings can be classified while collection continues; older/undated backlog is classified after collection, newest first. Up to 120 full eligibility checks run per refresh, in parallel batches of eight with three workers and a 45-second active budget per batch. Uncertain/failing calls remain reviewable. Large detail-only listings can use one batched title screen to avoid fetching obviously unrelated roles; full feeds and small lists avoid that extra call.
+The Jobs page shows completed and active companies alongside jobs reviewed, in review, and queued. Company collection and AI review have independent worker queues: as each company finishes saving descriptions, it joins a round-robin schedule feeding a bounded shared queue. Large companies cannot admit their entire backlog ahead of other ready companies. Three review workers combine ready jobs across companies into batches of up to eight, without waiting for a batch to fill, and save each finished batch immediately. Collection and review share the existing three-call AI limit; cache hits avoid repeated model calls. The refresh finishes after both collection and queued reviews finish. Each job is scheduled at most once per run, including uncertain/rules-fallback results. Large detail-only listings can use a batched title screen to avoid fetching obviously unrelated roles; full feeds and small lists avoid that extra call.
 
 Exact unchanged AI prompts reuse local validated answers for up to fourteen days in `.cache/jobs-ai`. Changed job text, titles or candidate experience produce different cache keys. Structured and server-rendered pages skip Chrome where possible; known challenge pages skip pointless AI extraction.
 
@@ -400,7 +470,7 @@ SmartRecruiters, Oracle Recruiting and Jibe/iCIMS have direct feed readers. Gene
 
 Run `python3 scripts/benchmark_job_refresh.py` for a repeatable offline concurrency comparison. A local run over 147 simulated feeds measured 3.946 seconds serial versus 0.584 seconds with eight workers (6.75x); this excludes real network/browser/model latency and does not promise that improvement for every site. CAPTCHA/access-blocked sites still require a usable official board link.
 
-Use **Review unreviewed jobs (N)** to process all saved jobs still missing a relevance/eligibility decision. This action reads the local database and calls the subscription AI; it does not fetch career portals or posting details. It skips completed reviews, processes the full queue beyond the refresh's120-job cap, and saves each24-job chunk. Undated or uncertain results can remain in Needs review. The button is disabled during collection/review and when the queue is empty. Changing experience via Save & recheck also uses this saved-only path. Review-only activity records last_review separately and does not change the last portal-refresh time.
+Use **Review unreviewed jobs (N)** to process all saved jobs still missing a relevance/eligibility decision. This action reads the local database and calls the subscription AI; it does not fetch career portals or posting details. It snapshots the full queue once, skips completed reviews, and uses the same three workers to save each finished batch immediately. Uncertain results can remain in Needs review. The button is disabled during collection/review and when the queue is empty. Changing experience via Save & recheck also uses this saved-only path. Review-only activity records last_review separately and does not change the last portal-refresh time.
 
 ## Live timing reports and returning to a job
 

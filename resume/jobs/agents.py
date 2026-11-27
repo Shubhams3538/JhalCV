@@ -35,6 +35,7 @@ AGENT_ATTEMPTS = 3   # tries per model before moving on to the next one
 RETRY_BACKOFF = 2.0  # seconds, doubled per retry: throttles clear, stalls pass
 CHAIN_GIVEUP = 2     # whole-chain failures in a row before skipping AI for the run
 NAMES = {'codex': 'Codex', 'claude': 'Claude Code'}
+NAMES.update({'openai': 'OpenAI', 'gemini': 'Gemini', 'anthropic': 'Anthropic', 'openrouter': 'OpenRouter'})
 _SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
             'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OPENROUTER_API_KEY', 'ZAI_API_KEY',
             'ZAI_BASE_URL', 'ZHIPUAI_API_KEY', 'ZHIPUAI_BASE_URL')

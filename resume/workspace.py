@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .descriptions import within
+from . import skill_swap
 from .render import fit, compile_pdf, page_count, RenderError
 from .storage import atomic_json
 from .verify import verify
@@ -30,6 +31,39 @@ def edited_projects(source, edits):
                 raise ValueError(f'{old["name"]}, bullet {i+1}: keep within the original character/word budget and do not add numbers.')
         new['bullets'] = [b.strip() for b in bullets]
     return proposed
+
+
+def fit_skills(candidate, plan, directory, root, template):
+    """Keep as many skills as the finished page holds, or None if none fit."""
+    full, removals = skill_swap.expand(candidate['skills'], plan)
+    trial = directory / 'skills-trial.pdf'
+    trial_data = directory / 'skills-trial.data.json'
+
+    def fits(count):
+        attempt = {**candidate, 'skills': skill_swap.without(full, removals[:count])}
+        compile_pdf(attempt, trial, root=root, template=template, data_path=trial_data)
+        return page_count(trial) == 1
+
+    try:
+        if not fits(len(removals)):
+            return None
+        # Each removal only frees space, so the smallest working count can be
+        # searched for instead of compiling every step.
+        low, high = 0, len(removals)
+        while low < high:
+            middle = (low + high) // 2
+            if fits(middle):
+                high = middle
+            else:
+                low = middle + 1
+        return skill_swap.without(full, removals[:low])
+    finally:
+        trial.unlink(missing_ok=True)
+        trial_data.unlink(missing_ok=True)
+
+
+def blocking_checks(checks):
+    return [c for c in checks if c['check'] not in ('glued-words', 'columns')]
 
 
 def build_preview(draft, edits, root, ident):
@@ -58,14 +92,35 @@ def build_preview(draft, edits, root, ident):
         out.write_bytes(baseline_pdf.read_bytes())
         atomic_json(directory / 'resume.data.json', source)
         notices.append('Reviewed wording wrapped beyond one page. Restored original project wording at the same layout; please review this PDF before saving.')
+    swap = None
+    plan = draft['report'].get('skill_plan')
+    if plan:
+        # The layout above was settled with the saved skills, so job terms only
+        # use room that is left. The saved skills stay as the safe fallback.
+        data_path = directory / 'resume.data.json'
+        try:
+            skills = fit_skills(candidate, plan, directory, root, template)
+            if skills is None:
+                raise RenderError('job skills do not fit')
+            tuned = {**candidate, 'skills': skills}
+            compile_pdf(tuned, out, root=root, template=template, data_path=data_path)
+            if page_count(out) != 1 or blocking_checks(verify(out, tuned, max_pages=1)):
+                raise RenderError('job skills failed verification')
+            swap = skill_swap.summarize(plan, tuned, candidate['skills'], skills)
+            notices.extend(skill_swap.notice(swap))
+            candidate = tuned
+        except RenderError:
+            compile_pdf(candidate, out, root=root, template=template, data_path=data_path)
+            notices.append('Kept your saved skills because the job skills did not fit or failed the PDF check.')
     checks = verify(out, candidate, max_pages=1)
-    blocking = [c for c in checks if c['check'] not in ('glued-words', 'columns')]
+    blocking = blocking_checks(checks)
     if blocking:
         raise ValueError('PDF verification failed: ' + '; '.join(c['check'] + ': ' + c['detail'] for c in blocking))
     revision = secrets.token_urlsafe(18)
     atomic_json(directory / 'resume.report.json', {
         'generated': datetime.now(timezone.utc).isoformat(), 'jd_text': draft['jd'], 'report': draft['report'],
         'wording_notice': draft['notice'], 'fit': result, 'layout_notices': notices, 'verify_failures': checks,
+        'skill_swap': swap,
     })
     draft['preview'] = {'revision': revision, 'path': out, 'checks': checks, 'notices': notices}
     return {'revision': revision, 'url': f'/api/pdf/{ident}/{revision}', 'checks': checks, 'notices': notices, 'pages': 1}

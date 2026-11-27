@@ -27,6 +27,12 @@ const el = (tag, props = {}, children = []) => {
 let state, profile, draft = null, imported = null, busy = false;
 let noticeTimer, viewRevision = 0;
 function notify(message, error = false) {
+  const setupFeedback = document.querySelector('#setup-feedback');
+  if (setupFeedback && document.querySelector('#setup-dialog')?.open) {
+    setupFeedback.hidden = false;
+    setupFeedback.textContent = message;
+    setupFeedback.className = error ? 'error' : 'hint';
+  }
   clearTimeout(noticeTimer);
   const notice = $('#notice');
   notice.hidden = false;
@@ -73,7 +79,7 @@ function updateActivity(progress) {
       el('span', {class: 'activity-dot'}),
       el('span', {class: 'activity-title',
         text: progress.test ? 'Test refresh (scratch database)'
-          : progress.phase === 'review' ? 'Reviewing saved jobs' : 'Refreshing jobs'}),
+          : progress.phase === 'review' ? 'Reviewing jobs' : 'Refreshing jobs'}),
       el('button', {class: 'activity-close', type: 'button', title: 'Hide for this task', text: '✕',
         onclick: e => { e.stopPropagation(); activityDismissed = true; card.hidden = true; }})
     ])];
@@ -202,7 +208,7 @@ const commaList = s => s.split(',').map(x => x.trim()).filter(Boolean);
 function bulletEditor(entry, allowPlanned = true) {
   const wrap = el('div', {class: 'wide bullet-editor'});
   function render() {
-    wrap.replaceChildren(el('p', {class: 'hint', text: allowPlanned ? 'Each bullet keeps its own status. Planned project work never appears on the resume. At least two shipped bullets are required per project.' : 'Experience renders exactly as saved. Add only confirmed work.'}));
+    wrap.replaceChildren(el('p', {class: 'hint', text: allowPlanned ? 'Each bullet keeps its own status. Planned project work never appears on the resume. Complete setup with at least three confirmed, shipped bullets per project. Three are shown by default.' : 'Experience renders exactly as saved. Add only confirmed work.'}));
     entry.bullets.forEach((bullet, index) => {
       const row = el('div', {class: 'bullet-row'});
       row.append(field('Bullet ' + (index + 1), bullet.text, value => bullet.text = value, {area: true}));
@@ -318,6 +324,8 @@ function renderProfile() {
     row.append(el('button', {type: 'button', class: 'text-button', text: 'Remove group', onclick: () => {delete profile.skills[group]; invalidate(); renderProfile();}}));
     skills.append(row);
   }
+  skills.append(field('Never remove these skills (comma separated)', (profile._locked?.pinned_skills || []).join(', '),
+    v => {profile._locked = {...profile._locked, pinned_skills: commaList(v)};}, {placeholder: 'Python, SQL'}));
   const groupName = el('input', {placeholder: 'New skill group, e.g. Languages', 'aria-label': 'New skill group'});
   skills.append(el('div', {class: 'import-row'}, [groupName, el('button', {type: 'button', class: 'secondary', text: 'Add group', onclick: () => {
     const name = groupName.value.trim(); if (!name || name.startsWith('_') || Object.hasOwn(profile.skills, name)) return notify('Enter a unique skill group name.', true);
@@ -347,6 +355,7 @@ function restoreView() {
 }
 function showView(view, remember = true, onJobs = null) {
   const revision = ++viewRevision;
+  clearTimeout(jobsPoll);
   if (!Object.hasOwn(VIEW_LABELS, view)) view = 'workspace';
   if (remember) rememberView(view);
   document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== view);
@@ -362,6 +371,32 @@ function showView(view, remember = true, onJobs = null) {
   if (view === 'insights') api('insights').then(renderInsights).catch(e => notify(e.message, true));
 }
 let jobsData = null, jobsTab = 'eligible', jobsPoll = null, refreshPick = new Set();
+let jobsFullPollAt = 0;
+function jobsProgressKey(progress) {
+  return JSON.stringify([progress.running, progress.phase, progress.started_at, progress.finished_at,
+    progress.completed, progress.review_completed, progress.error]);
+}
+async function pollJobs() {
+  const revision = viewRevision;
+  try {
+    if (document.hidden) return;
+    const {progress} = await api('jobs/progress');
+    if (revision !== viewRevision) return;
+    if (jobsProgressKey(progress) !== jobsProgressKey(jobsData.progress) || Date.now() - jobsFullPollAt > 15000) {
+      const data = await api('jobs');
+      if (revision === viewRevision) renderJobs(data);
+    } else {
+      jobsData.progress = progress;
+      updateActivity(progress);
+    }
+  } catch { /* A transient failure must not stop updates for the entire run. */ }
+  finally {
+    if (revision === viewRevision && jobsData?.progress.running) {
+      clearTimeout(jobsPoll);
+      jobsPoll = setTimeout(pollJobs, 2000);
+    }
+  }
+}
 let companyImport = [];
 function renderCompanyImport(data) {
   companyImport = data.rows;
@@ -399,46 +434,52 @@ function ago(seconds) {
 }
 function renderJobs(data) {
   jobsData = data;
+  jobsFullPollAt = Date.now();
   const running = data.progress.running;
   $('#jobs-source-count').textContent = data.sources.length + (data.sources.length === 1 ? ' COMPANY' : ' COMPANIES');
-  const sources = $('#jobs-sources'); const sourceScroll = sources.scrollTop; sources.replaceChildren();
+  const sources = $('#jobs-sources'); const sourceScroll = sources.scrollTop;
   refreshPick = new Set([...refreshPick].filter(id => data.sources.some(s => s.id === id)));
   const companyQuery = ($('#companies-search')?.value || '').trim().toLowerCase();
-  const visibleSources = data.sources.filter(s => !companyQuery || s.name.toLowerCase().includes(companyQuery));
-  for (const src of visibleSources) {
-    const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
-      : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
-    const locationInput = el('input', {type: 'text', value: src.locations || '', maxLength: 500,
-      placeholder: 'India, Remote', 'aria-label': `Locations to keep for ${src.name}`});
-    const locationForm = el('form', {class: 'source-location-form', onsubmit: e => {
-      e.preventDefault();
-      task(e.submitter, async () => {
-        renderJobs(await api('jobs/sources/locations', {id: src.id, locations: locationInput.value}));
-        notify('Location filter saved. Refresh to collect matching jobs.');
-      });
-    }}, [locationInput, el('button', {type: 'submit', class: 'text-button', text: 'Save locations', disabled: running})]);
-    const urlInput = el('input', {type: 'url', value: src.url, required: true, maxLength: 3000, 'aria-label': `Career URL for ${src.name}`});
-    const editLink = el('details', {}, [el('summary', {text: 'Edit career link'}), el('form', {class: 'source-location-form', onsubmit: e => {
-      e.preventDefault();
-      task(e.submitter, async () => {renderJobs(await api('jobs/sources/url', {id: src.id, url: urlInput.value})); notify('Career link updated. Saved jobs are retained.');});
-    }}, [urlInput, el('button', {type: 'submit', class: 'text-button', text: 'Save link', disabled: running})])]);
-    const pick = el('input', {type: 'checkbox', checked: refreshPick.has(src.id), disabled: running,
-      'aria-label': `Include ${src.name} in Refresh selected`, onchange: e => {
-        e.target.checked ? refreshPick.add(src.id) : refreshPick.delete(src.id); syncRefreshSelected();
-      }});
-    sources.append(el('div', {class: 'source-row'}, [
-      el('div', {class: 'source-info'}, [el('label', {class: 'source-pick'}, [pick, el('strong', {text: src.name})]), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm, editLink]),
-      el('div', {class: 'source-actions'}, [el('span', {class: 'pill', text: src.label.toUpperCase()}),
-      el('button', {type: 'button', class: 'secondary', text: 'Refresh ↻', disabled: running, title: `Refresh only ${src.name}`,
-        onclick: e => task(e.target, async () => renderJobs(await api('jobs/refresh', {sources: [src.id]})))}),
-      el('button', {type: 'button', class: 'text-button', text: 'Remove', disabled: running, onclick: e => {
-        if (!confirm(`Remove ${src.name} and its collected jobs?`)) return;
-        task(e.target, async () => renderJobs(await api('jobs/sources/remove', {id: src.id})));
-      }})])]));
+  const sourceKey = JSON.stringify([data.sources, running, companyQuery]);
+  if (sources.renderKey !== sourceKey) {
+    sources.replaceChildren();
+    const visibleSources = data.sources.filter(s => !companyQuery || s.name.toLowerCase().includes(companyQuery));
+    for (const src of visibleSources) {
+      const status = src.last_error ? el('small', {class: 'job-error', text: src.last_error})
+        : el('small', {text: src.last_run_at ? `${src.last_count} matching job(s) · refreshed ${ago(src.last_run_at)}` : 'Not refreshed yet'});
+      const locationInput = el('input', {type: 'text', value: src.locations || '', maxLength: 500,
+        placeholder: 'India, Remote', 'aria-label': `Locations to keep for ${src.name}`});
+      const locationForm = el('form', {class: 'source-location-form', onsubmit: e => {
+        e.preventDefault();
+        task(e.submitter, async () => {
+          renderJobs(await api('jobs/sources/locations', {id: src.id, locations: locationInput.value}));
+          notify('Location filter saved. Refresh to collect matching jobs.');
+        });
+      }}, [locationInput, el('button', {type: 'submit', class: 'text-button', text: 'Save locations', disabled: running})]);
+      const urlInput = el('input', {type: 'url', value: src.url, required: true, maxLength: 3000, 'aria-label': `Career URL for ${src.name}`});
+      const editLink = el('details', {}, [el('summary', {text: 'Edit career link'}), el('form', {class: 'source-location-form', onsubmit: e => {
+        e.preventDefault();
+        task(e.submitter, async () => {renderJobs(await api('jobs/sources/url', {id: src.id, url: urlInput.value})); notify('Career link updated. Saved jobs are retained.');});
+      }}, [urlInput, el('button', {type: 'submit', class: 'text-button', text: 'Save link', disabled: running})])]);
+      const pick = el('input', {type: 'checkbox', checked: refreshPick.has(src.id), disabled: running,
+        'aria-label': `Include ${src.name} in Refresh selected`, onchange: e => {
+          e.target.checked ? refreshPick.add(src.id) : refreshPick.delete(src.id); syncRefreshSelected();
+        }});
+      sources.append(el('div', {class: 'source-row'}, [
+        el('div', {class: 'source-info'}, [el('label', {class: 'source-pick'}, [pick, el('strong', {text: src.name})]), el('a', {href: src.url, target: '_blank', rel: 'noopener', text: src.url}), status, locationForm, editLink]),
+        el('div', {class: 'source-actions'}, [el('span', {class: 'pill', text: src.label.toUpperCase()}),
+        el('button', {type: 'button', class: 'secondary', text: 'Refresh ↻', disabled: running, title: `Refresh only ${src.name}`,
+          onclick: e => task(e.target, async () => renderJobs(await api('jobs/refresh', {sources: [src.id]})))}),
+        el('button', {type: 'button', class: 'text-button', text: 'Remove', disabled: running, onclick: e => {
+          if (!confirm(`Remove ${src.name} and its collected jobs?`)) return;
+          task(e.target, async () => renderJobs(await api('jobs/sources/remove', {id: src.id})));
+        }})])]));
+    }
+    if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No companies yet. Add one above.'}));
+    else if (!visibleSources.length) sources.append(el('p', {class: 'empty', text: 'No companies match your search.'}));
+    sources.scrollTop = sourceScroll;
+    sources.renderKey = sourceKey;
   }
-  if (!data.sources.length) sources.append(el('p', {class: 'empty', text: 'No companies yet. Add one above.'}));
-  else if (!visibleSources.length) sources.append(el('p', {class: 'empty', text: 'No companies match your search.'}));
-  sources.scrollTop = sourceScroll;
   const exp = data.experience;
   if (document.activeElement !== $('#jobs-years')) $('#jobs-years').value = exp.years;
   $('#experience-pill').textContent = `Experience · ${Number(exp.years ?? 0)} yrs`;
@@ -471,7 +512,7 @@ function renderJobs(data) {
   renderJobList();
   updateActivity(data.progress);
   clearTimeout(jobsPoll);
-  if (running) jobsPoll = setTimeout(() => api('jobs').then(renderJobs).catch(() => {}), 2000);
+  if (running) jobsPoll = setTimeout(pollJobs, 2000);
 }
 function syncRefreshSelected() {
   const button = $('#jobs-refresh-selected'), count = refreshPick.size;
@@ -489,10 +530,16 @@ function renderJobList() {
     const total = data.jobs.filter(j => jobInTab(j, group)).length;
     const count = group === jobsTab ? $('#jobs-count') : $(`#jobs-${group}-count`);
     count.textContent = query ? `${jobs.length} of ${total}` : String(total);
-    const list = $(selector); list.replaceChildren();
-    if (!jobs.length) list.append(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
+    const list = $(selector);
+    const renderKey = JSON.stringify([jobs, query, $('#jobs-sort').value, data.jobs.length === 0]);
+    if (list.renderKey === renderKey) continue;
+    const existing = new Map([...list.children].map(row => [row.dataset.jobId, row]));
+    const rows = [];
+    if (!jobs.length) rows.push(el('p', {class: 'empty', text: data.jobs.length ? 'No jobs in this section.' : 'Jobs appear here after a refresh.'}));
     const verdicts = {yes: ['ELIGIBLE', 'owned'], no: ['NOT ELIGIBLE', 'ineligible'], unclear: ['UNCLEAR', '']};
     for (const job of jobs) {
+      const jobKey = JSON.stringify(job), previous = existing.get(String(job.id));
+      if (previous?.jobKey === jobKey) {rows.push(previous); continue;}
       const [label, tone] = job.manual_eligible === 'no' ? ['NOT ELIGIBLE · YOU', 'ineligible'] : job.relevant === 'no' ? ['NOT RELEVANT', 'missing']
         : job.eligible === 'no' ? ['NOT ELIGIBLE', 'ineligible']
         : !job.relevant ? ['AWAITING REVIEW', ''] : verdicts[job.eligible] || ['CHECKING', ''];
@@ -517,7 +564,7 @@ function renderJobList() {
         if (!confirm('Delete this saved job? It will not be collected again from this careers page.')) return;
         task(e.target, async () => renderJobs(await api('jobs/delete', {id: job.id})));
       }}));
-      list.append(el('div', {class: 'job-row', 'data-job-id': String(job.id)}, [
+      const row = el('div', {class: 'job-row', 'data-job-id': String(job.id)}, [
         el('div', {class: 'job-info'}, [
           el('div', {class: 'job-title'}, [el('a', {href: job.url, target: '_blank', rel: 'noopener', text: job.title}),
             ...(job.status === 'new' ? [el('span', {class: 'job-new', text: 'NEW'})] : [])]),
@@ -527,8 +574,18 @@ function renderJobList() {
             el('summary', {text: 'AI assessment'}),
             ...(job.relevance_reason ? [el('small', {class: 'job-reason', text: 'Relevance: ' + job.relevance_reason})] : []),
             ...(job.reason ? [el('small', {class: 'job-reason', text: job.reason + (job.checked_by === 'rules' ? ' (text rules)' : '')})] : [])])] : [])]),
-        el('span', {class: 'pill ' + tone, text: label}), actions]));
+        el('span', {class: 'pill ' + tone, text: label}), actions]);
+      row.jobKey = jobKey;
+      rows.push(row);
     }
+    // Leave matching nodes attached so focus, open menus and explanations
+    // survive another job's update. Only changed rows are replaced.
+    const keep = new Set(rows);
+    for (const child of [...list.children]) if (!keep.has(child)) list.removeChild(child);
+    rows.forEach((row, index) => {
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+    });
+    list.renderKey = renderKey;
   }
 }
 let tailoringJob = null;
@@ -575,6 +632,8 @@ function returnToTailoredJob() {
   });
 }
 async function tailorForJob(job) {
+  // Before any await, so the browser treats it as part of the click.
+  openJobPosting(job);
   const context = {id: job.id, title: job.title, company: job.company, url: job.url, tab: jobsTab,
     search: $('#jobs-search').value, sort: $('#jobs-sort').value, scrollY: window.scrollY, sourceScroll: $('#jobs-sources').scrollTop,
     listOpen: $('#jobs-current').open, reviewOpen: $('#jobs-review').open,
@@ -587,6 +646,12 @@ async function tailorForJob(job) {
   tailoringJob = context; saveTailoringJob();
   showView('workspace'); window.scrollTo(0, 0);
   await createDraft();
+}
+function openJobPosting(job) {
+  try {
+    const url = new URL(job.url);
+    if (['http:', 'https:'].includes(url.protocol)) window.open(url.href, '_blank', 'noopener,noreferrer');
+  } catch {}
 }
 function insightBar(item) {
   const fill = el('span'); fill.style.width = item.percent + '%';
@@ -652,12 +717,15 @@ function modelEditor(key) {
     })})]);
 }
 function updateAiStatus() {
+  const choice = state.setup?.preferences?.provider || 'auto';
   $('#ai-status').textContent = state.ai_available && state.settings.tailorer !== 'rules'
-    ? 'AI available · automatic key failover' : 'Rules mode · your original wording';
+    ? (choice === 'auto' ? 'AI available · automatic provider fallback' : 'AI selected · ' + choice) : 'Rules mode · your original wording';
 }
 function renderKeys() {
   const info = state.credentials;
-  state.ai_available = info.keys.length > 0;
+  const choice = state.setup?.preferences?.provider || 'auto';
+  const installed = (state.setup?.agents || []).some(a => a.supported && a.installed && (choice === 'auto' || choice === a.id));
+  state.ai_available = choice !== 'rules' && (installed || info.keys.some(k => choice === 'auto' || k.provider === choice));
   updateAiStatus();
   $('#api-reminder-enabled').checked = !info.reminder_dismissed;
   const list = $('#api-key-list'); list.replaceChildren();
@@ -722,7 +790,7 @@ function setupKeys() {
       throw error;
     }
   });
-  if (info.show_reminder) reminder.showModal();
+  if (info.show_reminder && !state.setup?.required && !state.setup?.completed) reminder.showModal();
 }
 function renderUsage(data) {
   const n = value => Number(value).toLocaleString();
@@ -807,6 +875,17 @@ async function init() {
   $('#output-dir').value = s.output_dir; $('#filename').value = s.filename;
   $('#tailoring-mode').value = s.tailorer; $('#model').value = s.model;
   setupKeys();
+  $('#reopen-setup').onclick = e => task(e.target, () => openSetup());
+  $('#setup-dialog').addEventListener('cancel', e => {if (state.setup?.required) e.preventDefault();});
+  $('#setup-content').addEventListener('input', () => {
+    if (setupDraft && setupStep === 2) {
+      setupDraft.profileTouched = true; setupChanged(); updateSetupMissing();
+    }
+  });
+  $('#setup-content').addEventListener('click', e => {
+    if (setupDraft && setupStep === 2 && e.target.closest('button') && !e.target.closest('button').textContent.startsWith('Refill profile')) setupDraft.profileTouched = true;
+  });
+  if (state.setup?.required) await openSetup(false);
   try {
     const saved = JSON.parse(sessionStorage.getItem('jhalcv-tailoring-job') || 'null');
     if (saved && Number.isInteger(saved.id) && typeof saved.title === 'string' && typeof saved.company === 'string') tailoringJob = saved;
@@ -829,7 +908,7 @@ async function init() {
   const missing = Object.entries(state.dependencies).filter(([, ok]) => !ok).map(([name]) => name);
   $('#dependencies').textContent = missing.length ? 'Missing PDF tools: ' + missing.join(', ') + '. See the README setup.' : '✓ All PDF tools are installed.';
   $('#dependencies').className = missing.length ? 'warning' : 'hint';
-  if (state.example) notify('You’re viewing a sample profile. Open My profile and replace the sample details before creating your resume.');
+  if (state.example && !state.setup?.required) notify('You’re viewing a sample profile. Open My profile and replace the sample details before creating your resume.');
   document.querySelectorAll('.nav').forEach(b => b.onclick = () => showView(b.dataset.view));
   document.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
     document.querySelectorAll('.seg-btn').forEach(x => {
@@ -857,7 +936,7 @@ async function init() {
     notify('Settings saved.');
   });};
   $('#manual-project').onclick = () => {
-    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}]});
+    const id = crypto.randomUUID(); profile.projects.push({id, name: 'New project', stack: [], angles: ['backend'], bullets: [{id: id+'-1', angles: ['backend'], text: 'Describe what the project does.'}, {id: id+'-2', angles: ['backend'], text: 'Describe how you built it.'}, {id: id+'-3', angles: ['backend'], text: 'Describe the confirmed outcome.'}]});
     invalidate(); renderProjects(); $('#project-list details:last-child').open = true;
   };
   $('#import-project').onclick = e => task(e.target, importProject);
@@ -943,11 +1022,38 @@ async function importProject() {
     wrap.hidden = true; $('#github-url').value = ''; invalidate(); renderProjects(); notify('Project added and saved.');
   })}), el('button', {class: 'text-button', text: 'Discard import', onclick: () => {imported = null; wrap.hidden = true;}}));
 }
+let tailoringPoll = null, tailoringRun = null, tailoringGeneration = 0;
+function startTailoringProgress() {
+  tailoringRun = null;
+  const generation = ++tailoringGeneration;
+  const node = $('#tailor-progress'); node.hidden = false; node.textContent = 'Starting tailoring…';
+  const poll = async () => {
+    try {
+      const status = await api('tailor/progress');
+      if (generation !== tailoringGeneration) return;
+      if (status.running) tailoringRun = status.id;
+      if (status.running || (tailoringRun && status.id === tailoringRun)) {
+        node.textContent = `${status.stage || 'Tailoring'} · ${(status.elapsed_seconds || 0).toFixed(1)}s`;
+      }
+    } catch { /* Timing polls must never interrupt a resume request. */ }
+  };
+  clearInterval(tailoringPoll); tailoringPoll = setInterval(poll, 500);
+}
+function stopTailoringProgress(result) {
+  clearInterval(tailoringPoll); tailoringPoll = null;
+  tailoringGeneration++;
+  const node = $('#tailor-progress');
+  if (result?.timings) node.textContent = `Draft ready · ${result.timings.elapsed_seconds.toFixed(1)}s`;
+  else node.hidden = true;
+}
 async function createDraft() {
   if (state.example) throw new Error('Replace the sample profile in My profile and save it first.');
   if ($('#jd').value.trim().length < 40) throw new Error('Paste a job description of at least 40 characters.');
   await saveProfile();
-  draft = await api('tailor', {jd: $('#jd').value});
+  startTailoringProgress();
+  let generated = null;
+  try { generated = await api('tailor', {jd: $('#jd').value}); draft = generated; }
+  finally { stopTailoringProgress(generated); }
   renderDraft();
   notify('Draft ready. Review the project wording, then preview your PDF.');
 }
@@ -955,6 +1061,9 @@ function renderDraft() {
   $('#empty-preview').hidden = true;
   const wrap = $('#draft-preview'); wrap.hidden = false; wrap.replaceChildren();
   wrap.append(el('div', {class: 'report', text: draft.notice}));
+  if (draft.timings) wrap.append(el('details', {class: 'report'}, [
+    el('summary', {text: `Tailoring completed in ${draft.timings.elapsed_seconds.toFixed(1)}s`}),
+    ...draft.timings.stages.map(stage => el('p', {text: `${stage.label}: ${stage.seconds.toFixed(2)}s`}))]));
   draft.projects.forEach((p, pi) => {
     const card = el('article', {class: 'panel draft-project'}, [el('h3', {text: p.name}), el('p', {class: 'hint', text: 'Keep each bullet within its original character and word budget.'})]);
     const alternatives = (draft.library || []).filter(candidate => !draft.projects.some(chosen => chosen.id === candidate.id));

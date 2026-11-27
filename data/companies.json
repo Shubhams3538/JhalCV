@@ -1,0 +1,737 @@
+[
+  {
+    "name": "100ms",
+    "url": "https://jobs.lever.co/100ms",
+    "kind": "lever"
+  },
+  {
+    "name": "ACKO",
+    "url": "https://careers.kula.ai/acko?jobs=true",
+    "kind": "kula"
+  },
+  {
+    "name": "Adobe",
+    "url": "https://adobe.wd5.myworkdayjobs.com/external_experienced?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Airbnb",
+    "url": "https://job-boards.greenhouse.io/airbnb",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Akamai",
+    "url": "https://fa-extu-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1",
+    "kind": "oracle"
+  },
+  {
+    "name": "AlphaGrep",
+    "url": "https://job-boards.greenhouse.io/alphagrepsecurities",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Amagi",
+    "url": "https://www.amagi.com/careers/open-roles",
+    "kind": "page"
+  },
+  {
+    "name": "Amazon",
+    "url": "https://www.amazon.jobs/en/search?offset=0&result_limit=10&sort=recent&category%5B%5D=software-development&category%5B%5D=operations-it-support-engineering&category%5B%5D=machine-learning-science&category%5B%5D=systems-quality-security-engineering&distanceType=Mi&radius=24km&industry_experience=one_to_three_years&latitude=&longitude=&loc_group_id=&loc_query=&base_query=Software&city=&country=IND&region=&county=&query_options=&",
+    "kind": "amazon"
+  },
+  {
+    "name": "Amazon / AWS",
+    "url": "https://www.amazon.jobs/en/search?country%5B%5D=IND&sort=recent",
+    "kind": "amazon"
+  },
+  {
+    "name": "AMD",
+    "url": "https://careers.amd.com/careers-home/jobs?country=India",
+    "kind": "jibe"
+  },
+  {
+    "name": "American Express",
+    "url": "https://egug.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1",
+    "kind": "oracle"
+  },
+  {
+    "name": "Apple",
+    "url": "https://jobs.apple.com/en-in/search?location=india-INDC&team=ai-and-machine-learning-data-operations-MLAI-AIMLDO+computer-vision-MLAI-CV+data-science-engineering-and-generation-MLAI-DSEG+deep-learning-generative-ai-and-foundation-models-MLAI-DLRL+engineering-project-and-programme-management-MLAI-EPPM+information-systems-and-technology-MLAI-IST+machine-learning-compute-and-infrastructure-MLAI-MLI+mapping-and-motion-MLAI-MM+natural-language-processing-and-speech-technologies-MLAI-NLP+privacy-MLAI-PRI+responsible-ai-and-safety-MLAI-RAIS+search-and-knowledge-MLAI-SK+security-MLAI-SEC+apps-and-frameworks-SFTWR-AF+camera-and-photos-SFTWR-CP+cloud-and-back-end-infrastructure-SFTWR-CLD+devops-and-site-reliability-SFTWR-DSR+engineering-project-and-programme-management-SFTWR-EPM+gpu-and-graphics-SFTWR-GPUG+information-systems-and-technology-SFTWR-ISTECH+machine-learning-and-ai-SFTWR-MCHLN+operating-systems-SFTWR-COS+product-design-SFTWR-PD+security-and-privacy-SFTWR-SEC+software-quality-automation-tools-and-validation-SFTWR-SQAT+spatial-computing-SFTWR-SC+trust-and-safety-SFTWR-TS+user-experience-engineering-SFTWR-UEE+video-media-and-audio-technologies-SFTWR-VMAT+wireless-software-SFTWR-WSFT+support-engineering-CUST-SE",
+    "kind": "page"
+  },
+  {
+    "name": "Arista Networks",
+    "url": "https://careers.smartrecruiters.com/aristanetworks",
+    "kind": "smartrecruiters"
+  },
+  {
+    "name": "Arm",
+    "url": "https://careers.arm.com/search-jobs",
+    "kind": "page"
+  },
+  {
+    "name": "Ather Energy",
+    "url": "https://careers.atherenergy.com/jobs",
+    "kind": "page"
+  },
+  {
+    "name": "Atlassian",
+    "url": "https://www.atlassian.com/company/careers/all-jobs",
+    "kind": "page"
+  },
+  {
+    "name": "Atomicwork",
+    "url": "https://www.atomicwork.com/company/careers",
+    "kind": "page"
+  },
+  {
+    "name": "Autodesk",
+    "url": "https://autodesk.wd1.myworkdayjobs.com/Ext?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Barclays",
+    "url": "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays?locations=1110a9ca6540100196e1f0c315e90000&locations=112c0542820110016378a0a3e68d0000&locations=112c05428201100163788a5627320000&locations=253dfca5ccfc10016b1361f46cfe0000&locations=1ab48a98eb7c1001634cf23b210c0000&locations=b8f75d1cb9781000cd91027a85e30000&locations=1ab48a98eb7c100163423aff71b80000&locations=112c0542820110016377af553b050000&locations=112c0542820110016377c02c6ef00000&locations=1ab48a98eb7c100163465bf6c3310000&locations=112c05428201100163763bd6ad400000",
+    "kind": "workday"
+  },
+  {
+    "name": "BlackRock",
+    "url": "https://careers.blackrock.com/location/india-jobs/45831/1269750/2/4",
+    "kind": "page"
+  },
+  {
+    "name": "Bolna AI",
+    "url": "https://jobs.ashbyhq.com/bolna",
+    "kind": "ashby"
+  },
+  {
+    "name": "Booking.com",
+    "url": "https://careers.booking.com/",
+    "kind": "page"
+  },
+  {
+    "name": "Broadcom",
+    "url": "https://broadcom.wd1.myworkdayjobs.com/External_Career?locations=2a204116f85f01189cd964af936b70fb&locations=877d747df71910021363ea290d900000&locations=0dd627624e2e0176f301cad8dcd9ab0b&locations=86fa603fbe121001e54578757e6b0000&locations=2d466ab4e6e0013cf503069082349dd2",
+    "kind": "workday"
+  },
+  {
+    "name": "BrowserStack",
+    "url": "https://browserstack.wd3.myworkdayjobs.com/External?locations=07564020a4451005a3027f2ca2d60000&locations=880034dbc3281000c58cd519fd640000&locations=ab822483adc710009d4b55d085e60000",
+    "kind": "workday"
+  },
+  {
+    "name": "Canonical",
+    "url": "https://job-boards.greenhouse.io/canonical",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Capital One",
+    "url": "https://capitalone.wd12.myworkdayjobs.com/Capital_One?locations=0f0572524957105948f71e0c0ba44c1d",
+    "kind": "workday"
+  },
+  {
+    "name": "Cashfree Payments",
+    "url": "https://careers.kula.ai/cashfree?jobs=true",
+    "kind": "kula"
+  },
+  {
+    "name": "Chargebee",
+    "url": "https://www.chargebee.com/company/careers/",
+    "kind": "page"
+  },
+  {
+    "name": "Cisco",
+    "url": "https://careers.cisco.com/global/en",
+    "kind": "page"
+  },
+  {
+    "name": "CleverTap",
+    "url": "https://careers.kula.ai/clevertap",
+    "kind": "kula"
+  },
+  {
+    "name": "ClickHouse",
+    "url": "https://jobs.ashbyhq.com/clickhouse",
+    "kind": "ashby"
+  },
+  {
+    "name": "Cloudflare",
+    "url": "https://job-boards.greenhouse.io/cloudflare",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Cohesity",
+    "url": "https://cohesity.wd5.myworkdayjobs.com/Cohesity_Careers",
+    "kind": "workday"
+  },
+  {
+    "name": "Composio",
+    "url": "https://jobs.ashbyhq.com/composio",
+    "kind": "ashby"
+  },
+  {
+    "name": "Confluent",
+    "url": "https://careers.confluent.io/",
+    "kind": "page"
+  },
+  {
+    "name": "CRED",
+    "url": "https://jobs.lever.co/cred",
+    "kind": "lever"
+  },
+  {
+    "name": "CrowdStrike",
+    "url": "https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "D. E. Shaw",
+    "url": "https://www.deshawindia.com/careers",
+    "kind": "page"
+  },
+  {
+    "name": "Databricks",
+    "url": "https://job-boards.greenhouse.io/databricks",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "DevRev",
+    "url": "https://job-boards.greenhouse.io/devrev",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Docusign",
+    "url": "https://careers.docusign.com/careers-home/jobs",
+    "kind": "jibe"
+  },
+  {
+    "name": "Drivetrain",
+    "url": "https://jobs.lever.co/drivetrain?location=India",
+    "kind": "lever"
+  },
+  {
+    "name": "Druva",
+    "url": "https://job-boards.greenhouse.io/druva",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Elastic",
+    "url": "https://job-boards.greenhouse.io/elastic",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Ema",
+    "url": "https://jobs.ashbyhq.com/ema",
+    "kind": "ashby"
+  },
+  {
+    "name": "Emergent",
+    "url": "https://job-boards.greenhouse.io/emergentlabsinc",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Ethos Life",
+    "url": "https://job-boards.greenhouse.io/ethoslife?offices%5B%5D=4042816002",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Expedia Group",
+    "url": "https://expedia.wd108.myworkdayjobs.com/search?locations=c553432013ba103bbc5b28efceb250b1&locations=c553432013ba103bbc5cc6e3faef5396",
+    "kind": "workday"
+  },
+  {
+    "name": "F5",
+    "url": "https://ffive.wd5.myworkdayjobs.com/f5jobs?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Fivetran",
+    "url": "https://job-boards.greenhouse.io/fivetran",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Flipkart",
+    "url": "https://flipkart.turbohire.co/careerpage/4d757ba0-3d57-448a-b82c-238ed87ac90f",
+    "kind": "page"
+  },
+  {
+    "name": "Fortinet",
+    "url": "https://edel.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2001",
+    "kind": "oracle"
+  },
+  {
+    "name": "Fractal",
+    "url": "https://fractal.wd1.myworkdayjobs.com/Careers",
+    "kind": "workday"
+  },
+  {
+    "name": "Freshworks",
+    "url": "https://careers.smartrecruiters.com/freshworks",
+    "kind": "smartrecruiters"
+  },
+  {
+    "name": "GitHub",
+    "url": "https://www.github.careers/jobs?country=India",
+    "kind": "jibe"
+  },
+  {
+    "name": "GitLab",
+    "url": "https://job-boards.greenhouse.io/gitlab",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Glean",
+    "url": "https://job-boards.greenhouse.io/gleanwork",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Gnani.ai",
+    "url": "https://careers.gnani.ai/",
+    "kind": "page"
+  },
+  {
+    "name": "Goldman Sachs",
+    "url": "https://higher.gs.com/results",
+    "kind": "page"
+  },
+  {
+    "name": "Google",
+    "url": "https://www.google.com/about/careers/applications/jobs/results/?location=India&utm_source=chatgpt.com&target_level=EARLY&target_level=INTERN_AND_APPRENTICE&sort_by=date",
+    "kind": "google"
+  },
+  {
+    "name": "Grafana Labs",
+    "url": "https://job-boards.greenhouse.io/grafanalabs",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Graviton Research Capital",
+    "url": "https://job-boards.greenhouse.io/gravitonresearchcapital",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Groww",
+    "url": "https://job-boards.eu.greenhouse.io/groww",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Haptik",
+    "url": "https://haptik.freshteam.com/jobs",
+    "kind": "page"
+  },
+  {
+    "name": "Harness",
+    "url": "https://job-boards.greenhouse.io/harnessinc",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Hasura",
+    "url": "https://jobs.gem.com/promptql",
+    "kind": "page"
+  },
+  {
+    "name": "InMobi",
+    "url": "https://job-boards.greenhouse.io/inmobi",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Intel",
+    "url": "https://intel.wd1.myworkdayjobs.com/External?locations=1e4a4eb3adf101f44070f976bf8184cf&locations=fabab36f05f51000ba74e9448dc20000",
+    "kind": "workday"
+  },
+  {
+    "name": "Intuit",
+    "url": "https://jobs.intuit.com/search-jobs",
+    "kind": "page"
+  },
+  {
+    "name": "iRage Capital",
+    "url": "https://irage.in/recruitment.php",
+    "kind": "page"
+  },
+  {
+    "name": "JPMorgan Chase",
+    "url": "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs?locationId=300000000289360",
+    "kind": "oracle"
+  },
+  {
+    "name": "JumpCloud",
+    "url": "https://jobs.lever.co/jumpcloud",
+    "kind": "lever"
+  },
+  {
+    "name": "Juspay",
+    "url": "https://juspay.io/careers",
+    "kind": "page"
+  },
+  {
+    "name": "LambdaTest",
+    "url": "https://www.testmuai.com/career/",
+    "kind": "page"
+  },
+  {
+    "name": "Leena AI",
+    "url": "https://leena.ai/careers.html",
+    "kind": "page"
+  },
+  {
+    "name": "Level AI",
+    "url": "https://jobs.ashbyhq.com/level-ai",
+    "kind": "ashby"
+  },
+  {
+    "name": "LinkedIn",
+    "url": "https://jobs.lever.co/linkedin",
+    "kind": "lever"
+  },
+  {
+    "name": "Lowe's India",
+    "url": "https://talent.lowes.com/us/en/",
+    "kind": "page"
+  },
+  {
+    "name": "Mastercard",
+    "url": "https://mastercard.wd1.myworkdayjobs.com/CorporateCareers?locations=8eab563831bf10acb5d384310bb7d5ec&locations=8eab563831bf10acb97b7fba5feff76e&locations=2e83df2db0851073b1d3be60012912d5&locations=8eab563831bf10acb9d6f1103d78fa67&locations=8eab563831bf10acbb7b5bf86d570af1&locations=4a21bf4e5285455eb8a0037a87adf523&locations=28905a74db1b10019f5bb16c36030000&locations=8eab563831bf10acbc722e4859721571&locations=8ffae25149e210718ae5b2e1cb1993bb&locations=85a5bdf4e1831035984400a2fb698c94",
+    "kind": "workday"
+  },
+  {
+    "name": "Media.net",
+    "url": "https://careers.smartrecruiters.com/medianet",
+    "kind": "smartrecruiters"
+  },
+  {
+    "name": "Meesho",
+    "url": "https://jobs.lever.co/meesho",
+    "kind": "lever"
+  },
+  {
+    "name": "Meta",
+    "url": "https://www.metacareers.com/jobsearch/?q=india&offices[0]=Mumbai%2C%20India&offices[1]=Gurgaon%2C%20India&offices[2]=Bangalore%2C%20India&offices[3]=Hyderabad%2C%20India&offices[4]=New%20Delhi%2C%20India&sort_by_new=true&teams[0]=University%20Grad%20-%20Engineering%2C%20Tech%20%26%20Design&teams[1]=Software%20Engineering&teams[2]=Research&teams[3]=Infrastructure&teams[4]=Data%20%26%20Analytics&teams[5]=Artificial%20Intelligence&teams[6]=Advertising%20Technology",
+    "kind": "page"
+  },
+  {
+    "name": "Microsoft",
+    "url": "https://apply.careers.microsoft.com/careers?start=0&location=india&pid=1970393557041628&sort_by=timestamp&filter_include_remote=0&filter_include_relocation=0&filter_profession=software+engineering%2Ctechnical+support%2Cquantum+computing%2Csecurity+engineering",
+    "kind": "page"
+  },
+  {
+    "name": "MoEngage",
+    "url": "https://careers.kula.ai/moengage",
+    "kind": "kula"
+  },
+  {
+    "name": "MongoDB",
+    "url": "https://job-boards.greenhouse.io/mongodb",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Morgan Stanley",
+    "url": "https://morganstanley.eightfold.ai/careers",
+    "kind": "pcsx"
+  },
+  {
+    "name": "Neysa",
+    "url": "https://careers.kula.ai/neysa",
+    "kind": "kula"
+  },
+  {
+    "name": "NK Securities Research",
+    "url": "https://job-boards.eu.greenhouse.io/nksecuritiesresearch",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Nurix AI",
+    "url": "https://nurix.keka.com/careers/",
+    "kind": "keka"
+  },
+  {
+    "name": "Nutanix",
+    "url": "https://careers.nutanix.com/en/jobs/?search=&country=India&team=Information+Technology&team=Engineering&pagesize=20#results",
+    "kind": "page"
+  },
+  {
+    "name": "NVIDIA",
+    "url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?locationHierarchy1=2fcb99c455831013ea52b82135ba3266&jobFamilyGroup=0c40f6bd1d8f10ae43ffaefd46dc7e78&jobFamilyGroup=0c40f6bd1d8f10ae43ffbd1459047e84",
+    "kind": "workday"
+  },
+  {
+    "name": "Oracle / OCI",
+    "url": "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobsearch/jobs?locationId=300000000106947",
+    "kind": "oracle"
+  },
+  {
+    "name": "Palo Alto Networks",
+    "url": "https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcareers?locations=4c6868193c0310016a33a54db4b20000&locations=4c6868193c0310016a33b01abd8b0000&locations=e62cc4173be310016a98201022730000&locations=e62cc4173be310016a988b977ccd0000&locations=0925b66a7d40107de95dc57546152c93&locations=a4e5dc5cfe170161250a9bd1b000e413&locations=9b10db154fdd105cf240db7bb48decbe&locations=45eb6188f3f71001f085c28ca35a0000&locations=9b10db154fdd105cf1ec795200e5ec5f&locations=2e473c9ce0941001603bdcd7043c0000&locations=66d0de7ff36a1000cb93436346820000",
+    "kind": "workday"
+  },
+  {
+    "name": "PayPal",
+    "url": "https://paypal.wd1.myworkdayjobs.com/jobs?locations=bcdc9518960a0115db738aaa2d241899&locations=bcdc9518960a01a46ac477aa2d240c99",
+    "kind": "workday"
+  },
+  {
+    "name": "PhonePe",
+    "url": "https://www.phonepe.com/careers/job-openings/",
+    "kind": "page"
+  },
+  {
+    "name": "Point72",
+    "url": "https://job-boards.greenhouse.io/point72",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Postman",
+    "url": "https://www.postman.com/company/careers/open-positions/",
+    "kind": "page"
+  },
+  {
+    "name": "PubMatic",
+    "url": "https://job-boards.greenhouse.io/pubmatic",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Pure Storage",
+    "url": "https://job-boards.greenhouse.io/purestorage",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Quadeye",
+    "url": "https://career.quadeye.com/jobs/Careers",
+    "kind": "page"
+  },
+  {
+    "name": "Qualcomm",
+    "url": "https://careers.qualcomm.com/careers",
+    "kind": "pcsx"
+  },
+  {
+    "name": "Quantbox Research",
+    "url": "https://job-boards.greenhouse.io/quantboxresearchpte",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Quantiphi",
+    "url": "https://quantiphi.wd1.myworkdayjobs.com/Careers_at_Quantiphi?locations=004c6095ba3b100115771c2cfdde0000&locations=004c6095ba3b100115771a5d467d0000&locations=004c6095ba3b100115771fcae6340000&locations=6d53e33cae7b1000bb3394b224680000&locations=004c6095ba3b100115771dfc7b6f0000",
+    "kind": "workday"
+  },
+  {
+    "name": "Qube Research & Technologies",
+    "url": "https://job-boards.greenhouse.io/quberesearchandtechnologies",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Qure.ai",
+    "url": "https://career.qure.ai/jobs",
+    "kind": "page"
+  },
+  {
+    "name": "Razorpay",
+    "url": "https://job-boards.greenhouse.io/razorpaysoftwareprivatelimited",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "RevRag AI",
+    "url": "https://www.revrag.ai/careers",
+    "kind": "page"
+  },
+  {
+    "name": "Rippling",
+    "url": "https://www.rippling.com/en-IN/careers/open-roles",
+    "kind": "page"
+  },
+  {
+    "name": "Rocketlane",
+    "url": "https://careers.kula.ai/rocketlane?jobs=true",
+    "kind": "kula"
+  },
+  {
+    "name": "Rubrik",
+    "url": "https://job-boards.greenhouse.io/rubrik",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Salesforce",
+    "url": "https://www.salesforce.com/company/careers/jobs/?bc=OTH",
+    "kind": "salesforce"
+  },
+  {
+    "name": "SAP",
+    "url": "https://jobs.sap.com/",
+    "kind": "page"
+  },
+  {
+    "name": "Sarvam AI",
+    "url": "https://jobs.ashbyhq.com/sarvam",
+    "kind": "ashby"
+  },
+  {
+    "name": "Scalefusion",
+    "url": "https://promobitech.com/careers",
+    "kind": "page"
+  },
+  {
+    "name": "SentinelOne",
+    "url": "https://www.sentinelone.com/jobs/",
+    "kind": "page"
+  },
+  {
+    "name": "ServiceNow",
+    "url": "https://careers.smartrecruiters.com/servicenow",
+    "kind": "smartrecruiters"
+  },
+  {
+    "name": "Simplotel",
+    "url": "https://www.simplotel.com/careers",
+    "kind": "page"
+  },
+  {
+    "name": "SingleStore",
+    "url": "https://job-boards.greenhouse.io/singlestore",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Skit.ai",
+    "url": "https://skit.keka.com/careers/",
+    "kind": "keka"
+  },
+  {
+    "name": "Smallest AI",
+    "url": "https://jobs.ashbyhq.com/smallest",
+    "kind": "ashby"
+  },
+  {
+    "name": "Snowflake",
+    "url": "https://jobs.ashbyhq.com/snowflake",
+    "kind": "ashby"
+  },
+  {
+    "name": "Sprinklr",
+    "url": "https://sprinklr.wd1.myworkdayjobs.com/careers?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Squarepoint Capital",
+    "url": "https://job-boards.greenhouse.io/squarepointcapital",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Stripe",
+    "url": "https://job-boards.greenhouse.io/stripe",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Sumo Logic",
+    "url": "https://job-boards.greenhouse.io/sumologic",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Swiggy",
+    "url": "https://careers.smartrecruiters.com/swiggy",
+    "kind": "smartrecruiters"
+  },
+  {
+    "name": "Target in India",
+    "url": "https://target.wd5.myworkdayjobs.com/targetcareers?Location_Country=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Tekion",
+    "url": "https://jobs.ashbyhq.com/tekion",
+    "kind": "ashby"
+  },
+  {
+    "name": "ThoughtSpot",
+    "url": "https://thoughtspot.wd5.myworkdayjobs.com/careers",
+    "kind": "workday"
+  },
+  {
+    "name": "Tower Research Capital",
+    "url": "https://job-boards.greenhouse.io/towerresearchcapital",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Trexquant",
+    "url": "https://trexquant.com/careers",
+    "kind": "page"
+  },
+  {
+    "name": "TrueFoundry",
+    "url": "https://job-boards.greenhouse.io/truefoundry",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Twilio",
+    "url": "https://job-boards.greenhouse.io/twilio",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Uber",
+    "url": "https://www.uber.com/in/en/careers/list/",
+    "kind": "page"
+  },
+  {
+    "name": "Veeam",
+    "url": "https://job-boards.greenhouse.io/veeamsoftware",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Visa",
+    "url": "https://visa.wd5.myworkdayjobs.com/Visa?locationCountry=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "Walmart Global Tech",
+    "url": "https://careers.walmart.com/us/en/home",
+    "kind": "page"
+  },
+  {
+    "name": "Whatfix",
+    "url": "https://whatfix.com/careers/",
+    "kind": "page"
+  },
+  {
+    "name": "Winsen Labs",
+    "url": "https://winsenlabs.com/careers",
+    "kind": "page"
+  },
+  {
+    "name": "Workday",
+    "url": "https://workday.wd5.myworkdayjobs.com/Workday?Location_Country=c4f78be1a8f14da0ab49ce1162348a5e",
+    "kind": "workday"
+  },
+  {
+    "name": "WorldQuant",
+    "url": "https://job-boards.greenhouse.io/worldquant",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Yellow.ai",
+    "url": "https://yellow.ai/career/",
+    "kind": "page"
+  },
+  {
+    "name": "YugabyteDB",
+    "url": "https://job-boards.greenhouse.io/yugabyte",
+    "kind": "greenhouse"
+  },
+  {
+    "name": "Zepto",
+    "url": "https://www.zepto.com/s/careers",
+    "kind": "page"
+  },
+  {
+    "name": "Zeta",
+    "url": "https://jobs.lever.co/zeta",
+    "kind": "lever"
+  },
+  {
+    "name": "Zoho",
+    "url": "https://careers.zohocorp.com/jobs/Careers",
+    "kind": "page"
+  },
+  {
+    "name": "Zscaler",
+    "url": "https://job-boards.greenhouse.io/zscaler",
+    "kind": "greenhouse"
+  }
+]

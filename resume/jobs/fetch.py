@@ -85,6 +85,9 @@ def remaining(cap=TIMEOUT):
 
 _DNS_CACHE: dict[str, tuple[bool, float]] = {}
 _DNS_TTL = 300.0
+_CURL_HOSTS = {}  # Hosts whose current bot/TLS filter requires the curl transport.
+_CURL_LOCK = threading.Lock()
+_CURL_TTL = 300.0
 
 
 def _resolves_public(host: str) -> bool:
@@ -152,6 +155,28 @@ _OPENER = urllib.request.build_opener(_GuardedRedirects())
 @timed('http')
 def _open(request: urllib.request.Request, limit: int = MAX_BYTES) -> bytes:
     check_url(request.full_url)
+    host = urlsplit(request.full_url).netloc.lower()
+    with _CURL_LOCK:
+        prefer_curl = _CURL_HOSTS.get(host, 0) > time.monotonic()
+    if prefer_curl:
+        try:
+            return _curl(request, limit)
+        except FetchError:
+            # The site may have recovered or changed its filter; try the normal
+            # transport again, but do not retry curl twice for this request.
+            with _CURL_LOCK:
+                _CURL_HOSTS.pop(host, None)
+    def fallback():
+        if prefer_curl:
+            raise FetchError('Both HTTP transports failed.')
+        result = _curl(request, limit)
+        with _CURL_LOCK:
+            now = time.monotonic()
+            for key in list(_CURL_HOSTS):
+                if _CURL_HOSTS[key] <= now:
+                    del _CURL_HOSTS[key]
+            _CURL_HOSTS[host] = now + _CURL_TTL
+        return result
     try:
         with _OPENER.open(request, timeout=remaining()) as response:
             final = response.geturl()
@@ -163,14 +188,14 @@ def _open(request: urllib.request.Request, limit: int = MAX_BYTES) -> bytes:
         # Several career sites answer urllib with 403/406/429 while serving a
         # browser-shaped client normally; one curl attempt covers both cases.
         try:
-            return _curl(request, limit)
+            return fallback()
         except FetchError:
             raise FetchError(f'The site returned HTTP {e.code}.') from None
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as e:
         # Bot filters drop urllib's TLS handshake (a handshake timeout, not a
         # refused connection). curl negotiates HTTP/2 like a real browser.
         try:
-            return _curl(request, limit)
+            return fallback()
         except FetchError:
             raise FetchError('Could not reach the site. Check the URL and your connection.') from None
     if len(data) > limit:
@@ -261,27 +286,9 @@ def render_page(url: str) -> str:
 
 @timed('browser')
 def _render_page(chrome, url):
-    with tempfile.TemporaryDirectory(prefix='jhalcv-chrome-') as profile:
-        try:
-            proc = subprocess.run(
-                [chrome, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-                 '--disable-extensions', '--mute-audio', f'--user-data-dir={profile}',
-                 # The default headless agent says "HeadlessChrome", which bot
-                 # filters (Cloudflare, Uber, SAP, Akamai) reject before any
-                 # job HTML is served; send the agent a real tab would, and
-                 # hide the automation flag headless mode otherwise sets.
-                 f'--user-agent={HEADERS["User-Agent"]}',
-                 '--disable-blink-features=AutomationControlled',
-                 # Bound the load so a page that keeps polling analytics still
-                 # dumps its DOM instead of hanging until the hard timeout.
-                 '--virtual-time-budget=9000', '--timeout=60000', '--dump-dom', url],
-                capture_output=True, timeout=remaining(RENDER_TIMEOUT))
-        except subprocess.TimeoutExpired:
-            raise FetchError('The page took too long to load in the browser.') from None
-        except OSError:
-            raise FetchError('Could not start Chrome to load this page.') from None
-    page = proc.stdout[:MAX_BYTES].decode('utf-8', errors='replace')
-    if proc.returncode != 0 or len(page) < 500:
+    from .browser_pool import render
+    page = render(chrome, url).encode('utf-8')[:MAX_BYTES].decode('utf-8', errors='replace')
+    if len(page) < 500:
         raise FetchError('Chrome could not load this page.')
     return page
 

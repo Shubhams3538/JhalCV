@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import re
 import time
+import threading
 from datetime import date, timedelta
 from contextlib import contextmanager
 from pathlib import Path
@@ -84,6 +85,8 @@ def matching_location_label(location: str, locations: str) -> str:
 class JobStore:
     def __init__(self, root, filename='jobs.db'):
         self.path = Path(root) / '.local' / filename
+        self._schema_lock = threading.Lock()
+        self._schema_version = None
 
     @contextmanager
     def db(self):
@@ -97,34 +100,44 @@ class JobStore:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute('PRAGMA foreign_keys = ON')
-        conn.executescript(SCHEMA)
         try:
-            # Serialize additive migration, including callers from older installations.
-            with conn:
-                conn.execute('BEGIN IMMEDIATE')
-                columns = {r['name'] for r in conn.execute('PRAGMA table_info(jobs)')}
-                source_columns = {r['name'] for r in conn.execute('PRAGMA table_info(sources)')}
-                if 'locations' not in source_columns:
-                    conn.execute("ALTER TABLE sources ADD COLUMN locations TEXT NOT NULL DEFAULT ''")
-                if 'original_url' not in source_columns:
-                    conn.execute("ALTER TABLE sources ADD COLUMN original_url TEXT NOT NULL DEFAULT ''")
-                if 'resolved_at' not in source_columns:
-                    conn.execute('ALTER TABLE sources ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0')
-                legacy_dates = 'relevant' not in columns
-                for name in ('relevant', 'relevance_reason', 'manual_eligible'):
-                    if name not in columns:
-                        conn.execute(f'ALTER TABLE jobs ADD COLUMN {name} TEXT')
-                if legacy_dates:
-                    # Older Greenhouse readers substituted updated_at for posting time.
-                    # The provenance is lost: quarantine until a refresh supplies first_published.
-                    conn.execute("UPDATE jobs SET posted='' WHERE source_id IN (SELECT id FROM sources WHERE kind='greenhouse')")
-                if 'detail_attempted_at' not in columns:
-                    conn.execute('ALTER TABLE jobs ADD COLUMN detail_attempted_at INTEGER NOT NULL DEFAULT 0')
-                self._seed_job_sequence(conn)
+            with self._schema_lock:
+                version = conn.execute('PRAGMA schema_version').fetchone()[0]
+                if version != self._schema_version:
+                    self._initialize(conn)
+                    self._schema_version = conn.execute('PRAGMA schema_version').fetchone()[0]
             with conn:
                 yield conn
         finally:
             conn.close()
+
+    def _initialize(self, conn):
+        # Polling and review reads must not hold up a source saving new jobs.
+        # Keep SQLite's default synchronous durability for committed writes.
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.executescript(SCHEMA)
+        # Serialize additive migration, including callers from older installations.
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            columns = {r['name'] for r in conn.execute('PRAGMA table_info(jobs)')}
+            source_columns = {r['name'] for r in conn.execute('PRAGMA table_info(sources)')}
+            if 'locations' not in source_columns:
+                conn.execute("ALTER TABLE sources ADD COLUMN locations TEXT NOT NULL DEFAULT ''")
+            if 'original_url' not in source_columns:
+                conn.execute("ALTER TABLE sources ADD COLUMN original_url TEXT NOT NULL DEFAULT ''")
+            if 'resolved_at' not in source_columns:
+                conn.execute('ALTER TABLE sources ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0')
+            legacy_dates = 'relevant' not in columns
+            for name in ('relevant', 'relevance_reason', 'manual_eligible'):
+                if name not in columns:
+                    conn.execute(f'ALTER TABLE jobs ADD COLUMN {name} TEXT')
+            if legacy_dates:
+                # Older Greenhouse readers substituted updated_at for posting time.
+                # The provenance is lost: quarantine until a refresh supplies first_published.
+                conn.execute("UPDATE jobs SET posted='' WHERE source_id IN (SELECT id FROM sources WHERE kind='greenhouse')")
+            if 'detail_attempted_at' not in columns:
+                conn.execute('ALTER TABLE jobs ADD COLUMN detail_attempted_at INTEGER NOT NULL DEFAULT 0')
+            self._seed_job_sequence(conn)
 
     # sources
     def sources(self) -> list[dict]:
@@ -177,6 +190,8 @@ class JobStore:
 
     def remove_source(self, ident: int) -> None:
         with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            self._seed_job_sequence(c)
             c.execute('DELETE FROM sources WHERE id = ?', (ident,))
 
     def reset_collection(self) -> None:
@@ -260,7 +275,7 @@ class JobStore:
                     old = c.execute('SELECT title, requirements, description FROM jobs WHERE id=?', (row['id'],)).fetchone()
                     if old['title'] != j['title'] or (j['requirements'] and old['requirements'] != j['requirements']) or (j['description'] and old['description'] != j['description']):
                         c.execute('UPDATE jobs SET min_years=NULL, reason=NULL, checked_by=NULL, eligible=NULL, relevant=NULL, relevance_reason=NULL WHERE id=?', (row['id'],))
-                    c.execute('UPDATE jobs SET title=?, location=?, url=?, posted=COALESCE(NULLIF(?, \'\'), posted), '
+                    c.execute('UPDATE jobs SET title=?, location=COALESCE(NULLIF(?, \'\'), location), url=?, posted=COALESCE(NULLIF(?, \'\'), posted), '
                               'last_seen_at=?, active=1 WHERE id=?',
                               (j['title'], j['location'], j['url'], j['posted'], now, row['id']))
                     c.execute("UPDATE jobs SET requirements=COALESCE(NULLIF(?, ''), requirements), "
@@ -287,26 +302,29 @@ class JobStore:
 
     def set_detail(self, ident: int, detail: dict) -> None:
         with self.db() as c:
-            old = c.execute('SELECT requirements, description FROM jobs WHERE id=?', (ident,)).fetchone()
+            old = c.execute('SELECT title, location, requirements, description FROM jobs WHERE id=?', (ident,)).fetchone()
             if old is None:
                 return  # Explicitly deleted while its page was being fetched.
             requirements = detail.get('requirements') or old['requirements']
             description = detail.get('description') or old['description']
-            if requirements != old['requirements'] or description != old['description']:
+            title = detail.get('title') or old['title']
+            location = detail.get('location') or old['location']
+            if title != old['title'] or requirements != old['requirements'] or description != old['description']:
                 c.execute('UPDATE jobs SET min_years=NULL, eligible=NULL, reason=NULL, checked_by=NULL, '
                           'relevant=NULL, relevance_reason=NULL WHERE id=?', (ident,))
-            c.execute("UPDATE jobs SET requirements=?, description=?, posted=COALESCE(NULLIF(?, ''), posted) WHERE id=?",
-                      (requirements, description, detail.get('posted', ''), ident))
+            c.execute("UPDATE jobs SET title=?, location=?, requirements=?, description=?, posted=COALESCE(NULLIF(?, ''), posted) WHERE id=?",
+                      (title, location, requirements, description, detail.get('posted', ''), ident))
 
-    def detail_candidates(self, source_id: int) -> list[dict]:
+    def detail_candidates(self, source_id: int, *, missing_locations=()) -> list[dict]:
+        missing_locations = set(missing_locations)
         with self.db() as c:
             rows = [dict(r) for r in c.execute(
                 "SELECT * FROM jobs WHERE source_id=?", (source_id,))]
             source = c.execute('SELECT locations FROM sources WHERE id=?', (source_id,)).fetchone()
         locations = source['locations'] if source else ''
         return sorted([r for r in rows if r.get('manual_eligible') != 'no' and r.get('relevant') != 'no'
-                       and (not r['location'] or location_matches(r['location'], locations)) and
-                       (freshness(r['posted']) == 'unknown'
+                       and (r['external_id'] in missing_locations or not r['location'] or location_matches(r['location'], locations)) and
+                       ((r['active'] and r['external_id'] in missing_locations) or freshness(r['posted']) == 'unknown'
                        or (r['active'] and not r['requirements'] and freshness(r['posted']) != 'expired'))],
                       key=lambda r: r['detail_attempted_at'])
 
@@ -315,14 +333,21 @@ class JobStore:
             c.execute('UPDATE jobs SET detail_attempted_at=? WHERE source_id=? AND external_id=?',
                       (time.time_ns(), source_id, external_id))
 
-    def unchecked(self, limit: int | None, source_ids=None) -> list[dict]:
+    def unchecked(self, limit: int | None, source_ids=None, *, exclude_ids=(), with_text=True) -> list[dict]:
+        if source_ids is not None:
+            source_ids = tuple(source_ids)
+            if not source_ids:
+                return []
+        scope = '' if source_ids is None else ' AND j.source_id IN (' + ','.join('?' for _ in source_ids) + ')'
+        text_fields = 'j.requirements, j.description, ' if with_text else ''
         with self.db() as c:
             rows = [dict(r) for r in c.execute(
-                "SELECT j.id, j.source_id, j.title, j.location, j.requirements, j.description, j.posted, j.status, s.locations "
+                "SELECT j.id, j.source_id, j.title, j.location, " + text_fields + "j.posted, j.status, s.locations "
                 "FROM jobs j JOIN sources s ON s.id=j.source_id "
                 "WHERE (j.eligible IS NULL OR j.relevant IS NULL) AND j.status != 'hidden' AND j.manual_eligible IS NULL "
-                "AND (j.eligible IS NULL OR j.eligible != 'no') AND (j.relevant IS NULL OR j.relevant != 'no')")]
-        rows = [r for r in rows if (source_ids is None or r['source_id'] in source_ids)
+                "AND (j.eligible IS NULL OR j.eligible != 'no') AND (j.relevant IS NULL OR j.relevant != 'no')" + scope,
+                () if source_ids is None else tuple(source_ids))]
+        rows = [r for r in rows if r['id'] not in exclude_ids
                 and (r['status'] == 'applied' or location_matches(r['location'], r['locations']))]
         return newest_first(rows)[:limit]
 
@@ -335,6 +360,27 @@ class JobStore:
                           "relevance_reason=?, posted=CASE WHEN posted='' AND ?<>'' THEN ? ELSE posted END WHERE id=?",
                           [(v['min_years'], v['eligible'], v['reason'], v['by'], v.get('relevant'),
                             v.get('relevance_reason', ''), v.get('posted', ''), v.get('posted', ''), ident) for ident, v in verdicts.items()])
+
+    def guard_saved(self, guard) -> int:
+        """Recheck yes verdicts and queue old code vetoes for fresh AI review."""
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            # The old guard discarded the original model's verdict when it
+            # vetoed a match. Re-evaluate those decisions instead of upgrading
+            # them blindly or preserving a parser error forever.
+            c.execute("UPDATE jobs SET eligible=NULL, min_years=NULL, reason=NULL, checked_by=NULL "
+                      "WHERE manual_eligible IS NULL AND eligible IN ('no','unclear') AND "
+                      "(reason LIKE 'Posting asks for %' OR reason LIKE 'Mentions %years; check whether%')")
+            changed = 0
+            for row in list(c.execute("SELECT id, title, requirements, description, min_years, eligible, reason "
+                                      "FROM jobs WHERE eligible='yes'")):
+                before = {'min_years': row['min_years'], 'eligible': row['eligible'], 'reason': row['reason']}
+                after = guard(before, row['title'], f"{row['requirements']}\n{row['description']}")
+                if after != before:
+                    c.execute('UPDATE jobs SET min_years=?, eligible=?, reason=? WHERE id=?',
+                              (after['min_years'], after['eligible'], after['reason'], row['id']))
+                    changed += 1
+            return changed
 
     def reset_eligibility(self) -> None:
         with self.db() as c:
@@ -374,10 +420,11 @@ class JobStore:
 
     def delete_job(self, ident: int) -> None:
         with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            self._seed_job_sequence(c)
             row = c.execute('SELECT source_id, external_id, url FROM jobs WHERE id=?', (ident,)).fetchone()
             if row is None:
                 raise ValueError('This job has already been deleted.')
-            self._seed_job_sequence(c)
             self._dismiss_row(c, row)
             c.execute('DELETE FROM jobs WHERE id=?', (ident,))
 
@@ -386,6 +433,7 @@ class JobStore:
             raise ValueError('Choose a jobs category.')
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')
+            self._seed_job_sequence(c)
             rows = [dict(r) for r in c.execute('SELECT j.*, s.locations FROM jobs j JOIN sources s ON s.id=j.source_id')]
             for row in rows:
                 if category(row) == group and (row['status'] == 'applied' or location_matches(row['location'], row['locations'])):
@@ -396,6 +444,7 @@ class JobStore:
         cutoff = (today or date.today()) - timedelta(days=8)
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')
+            self._seed_job_sequence(c)
             rows = list(c.execute("SELECT id, source_id, external_id, url, posted FROM jobs WHERE status!='applied'"))
             for row in rows:
                 posted = posting_date(row['posted'])

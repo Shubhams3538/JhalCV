@@ -13,9 +13,10 @@ import re
 
 from . import llm
 from .insights import canonical
+from .timing import stage
 from .tailor import (ANGLE_KEYWORDS, parse_jd as parse_jd_rules,
-                     tailor as tailor_rules, renderable, project_cap, MAX_SKILLS_PER_GROUP,
-                     _score_bullet, _score_project)
+                     tailor as tailor_rules, renderable, project_cap, MAX_SKILLS_PER_GROUP, printed_skills,
+                     _score_bullet, _score_project, diversify, term_weights)
 
 # The closed angle enum. Kept in sync with the rule-based vocabulary by deriving
 # it from the same dict, so the two tailorers can never disagree about what
@@ -191,6 +192,13 @@ def parse_jd_llm(jd_text: str, profile: dict, *, model: str = JD_MODEL,
         schema_name="jd_analysis",
         cache=cache,
     )
+    return analysis_from_raw(raw, jd_text, profile), hit
+
+
+def analysis_from_raw(raw, jd_text, profile):
+    """Validate/merge an analysis from either the staged or combined request."""
+    raw = dict(raw)
+    vocab = _vocabulary(profile)
     raw["_jd_blob"] = " " + jd_text.lower() + " "
     result = normalise(raw, vocab)
 
@@ -212,7 +220,7 @@ def parse_jd_llm(jd_text: str, profile: dict, *, model: str = JD_MODEL,
                                   if canonical(g) not in optional)
     result["_angles_from"] = "llm"
     result["_skills_from"] = "rules+llm"
-    return result, hit
+    return result
 
 
 def parse_jd_safe(jd_text: str, profile: dict, **kw) -> tuple[dict, str]:
@@ -310,6 +318,31 @@ def _select_schema(profile: dict) -> dict:
     }
 
 
+def project_entry(proj: dict, analysis: dict, bullets_per_project: int) -> dict:
+    """A project's most job-relevant bullets, rendered in profile order."""
+    scored = sorted(proj["bullets"], key=lambda b: -_score_bullet(b, analysis))
+    ids = {b["id"] for b in scored[:bullets_per_project]}
+    kept = [b for b in proj["bullets"] if b["id"] in ids]
+    entry = {"_project_id": proj["id"], "name": proj["name"], "stack": proj.get("stack", []),
+             "bullets": [b["text"] for b in kept],
+             "_bullet_meta": [{"id": b["id"], "score": _score_bullet(b, analysis)} for b in kept]}
+    if "link" in proj:
+        entry["link"] = proj["link"]
+    return entry
+
+
+def diversify_selection(chosen: list, profile: dict, analysis: dict, keywords: list,
+                        bullets_per_project: int) -> tuple[list, list]:
+    """Replace a repeated-stack pick with a project that proves more of the job."""
+    by_id = {p["id"]: p for p in profile["projects"]}
+    picked = [by_id[entry["_project_id"]] for entry in chosen]
+    rest = sorted((p for p in profile["projects"] if all(p is not q for q in picked)),
+                  key=lambda p: -_score_project(p, analysis))
+    final, swaps = diversify(picked + rest, term_weights(analysis["matched_skills"], keywords), len(chosen))
+    entries = {entry["_project_id"]: entry for entry in chosen}
+    return [entries.get(p["id"]) or project_entry(p, analysis, bullets_per_project) for p in final], swaps
+
+
 def validate_selection(raw: dict, profile: dict, analysis: dict, *,
                        max_projects: int, bullets_per_project: int) -> tuple[dict, list[str]]:
     """Repair a raw selection into something safe to render.
@@ -376,15 +409,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
         missing = sorted((p for p in profile["projects"] if p["id"] not in seen),
                          key=lambda p: -_score_project(p, analysis))
         for proj in missing[:required - len(chosen)]:
-            scored = sorted(proj["bullets"], key=lambda b: -_score_bullet(b, analysis))
-            ids = {b["id"] for b in scored[:bullets_per_project]}
-            kept = [b for b in proj["bullets"] if b["id"] in ids]
-            entry_out = {"_project_id": proj["id"], "name": proj["name"], "stack": proj.get("stack", []),
-                         "bullets": [b["text"] for b in kept],
-                         "_bullet_meta": [{"id": b["id"], "score": _score_bullet(b, analysis)} for b in kept]}
-            if "link" in proj:
-                entry_out["link"] = proj["link"]
-            chosen.append(entry_out)
+            chosen.append(project_entry(proj, analysis, bullets_per_project))
             problems.append(f"{proj['id']}: selected by you but omitted by the model, added")
 
     if not chosen:
@@ -395,6 +420,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
     # skill you actually have can never be silently lost.
     returned = {g.get("label"): g.get("ordered_items", []) for g in raw.get("skills", [])}
     skills = []
+    pinned = profile.get("_locked", {}).get("pinned_skills", [])
     for label, items in profile["skills"].items():
         if label.startswith("_") or not isinstance(items, list):
             continue
@@ -409,7 +435,7 @@ def validate_selection(raw: dict, profile: dict, analysis: dict, *,
         missing = [i for i in items if i not in used]
         if missing:
             problems.append(f"{label}: appended {len(missing)} item(s) the model omitted")
-        skills.append({"label": label, "items": (ordered + missing)[:MAX_SKILLS_PER_GROUP]})
+        skills.append({"label": label, "items": printed_skills(ordered + missing, pinned)})
 
     return {"projects": chosen, "skills": skills}, problems
 
@@ -455,11 +481,13 @@ def tailor_llm(profile: dict, jd_text: str, *, max_projects: int = 2,
         return data, report
 
     try:
-        analysis, jd_hit = parse_jd_llm(jd_text, profile, model=model or JD_MODEL, cache=cache)
-        selection, problems, sel_hit, raw = select_llm(
-            profile, analysis, max_projects=max_projects,
-            bullets_per_project=bullets_per_project, model=model or SELECT_MODEL, cache=cache,
-            jd_text=jd_text)
+        with stage('analysis', 'Analyzing the job description'):
+            analysis, jd_hit = parse_jd_llm(jd_text, profile, model=model or JD_MODEL, cache=cache)
+        with stage('selection', 'Selecting projects and bullets'):
+            selection, problems, sel_hit, raw = select_llm(
+                profile, analysis, max_projects=max_projects,
+                bullets_per_project=bullets_per_project, model=model or SELECT_MODEL, cache=cache,
+                jd_text=jd_text)
     except llm.LLMError as e:
         report["llm"] = {"used": False, "reason": str(e)}
         return data, report

@@ -503,7 +503,7 @@ def page_detail(item: dict) -> dict:
         page = render_page(item['needs_detail'])
         structured = _json_ld_jobs(page, item['needs_detail'])
     text = html_to_text(page)
-    result = ({k: structured[0][k] for k in ('requirements', 'description', 'posted')}
+    result = ({k: structured[0][k] for k in ('requirements', 'description', 'posted', 'location')}
               if len(structured) == 1 else {'requirements': text[:20000], 'description': text[:30000]})
     label = re.search(r'\bDate live:\s*(\d{2}/\d{2}/\d{4})\b', text, re.I)
     visible = _barclays_date(label.group(1), item['needs_detail']) if label else ''

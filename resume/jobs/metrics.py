@@ -22,6 +22,8 @@ LABELS = {
     'discovery': 'Portal discovery (inclusive)', 'details': 'Posting details (inclusive)',
     'detail_queue': 'Wait for detail worker', 'source_queue': 'Wait for company worker',
     'source': 'Company collection (inclusive)', 'eligibility': 'Eligibility batches (inclusive)',
+    'browser_startup': 'Chrome process startup', 'browser_navigation': 'Browser page loading and scripts',
+    'browser_dom': 'Browser HTML extraction',
 }
 
 

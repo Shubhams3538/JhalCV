@@ -19,6 +19,61 @@ def route(provider='openai', key=KEY1, ident='one'):
 
 
 class ProviderTests(unittest.TestCase):
+    def setUp(self):
+        health = patch.dict(llm._ROUTE_HEALTH, {}, clear=True)
+        health.start()
+        self.addCleanup(health.stop)
+
+    @patch('resume.llm.cli_routes', return_value=[])
+    @patch('resume.provider_api.call')
+    def test_warm_fallback_cache_is_used_before_trying_cold_first_route(self, call, cli):
+        call.return_value = {'ok': True}
+        with tempfile.TemporaryDirectory() as directory:
+            fallback = route('gemini', KEY2, 'two')
+            with llm.credential_scope([fallback], directory):
+                llm.ask('cached task', SCHEMA)
+            call.reset_mock()
+            with llm.credential_scope([route(), fallback], directory):
+                self.assertEqual(llm.ask('cached task', SCHEMA), ({'ok': True}, True))
+            call.assert_not_called()
+
+    @patch('resume.llm.cli_routes', return_value=[])
+    @patch('resume.provider_api.call')
+    def test_failed_route_cools_down_across_requests_and_changed_key_gets_new_attempt(self, call, cli):
+        call.side_effect = [llm.LLMError('timeout'), {'ok': True}, {'ok': True}, {'ok': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            for prompt in ('first', 'second'):
+                with llm.credential_scope([route(), route('gemini', KEY2, 'two')], directory):
+                    llm.ask(prompt, SCHEMA, cache=False)
+            self.assertEqual([c.args[0]['provider'] for c in call.call_args_list], ['openai', 'gemini', 'gemini'])
+            with llm.credential_scope([route(key='changed-PRIVATE-key')], directory):
+                llm.ask('third', SCHEMA, cache=False)
+            self.assertEqual(call.call_args.args[0]['provider'], 'openai')
+
+    @patch('resume.llm._cli_ask')
+    @patch('resume.llm.cli_routes')
+    def test_last_successful_cli_is_tried_first_in_new_request(self, cli_routes, cli_ask):
+        cli_routes.side_effect = lambda: [
+            {'id': 'cli:codex', 'provider': 'codex', 'model': 'codex-default', 'cli': 'codex'},
+            {'id': 'cli:claude', 'provider': 'claude', 'model': 'sonnet', 'cli': 'claude'}]
+        cli_ask.side_effect = [llm.LLMError('timeout'), {'ok': True}, {'ok': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            for prompt in ('first', 'second'):
+                with llm.credential_scope([], directory):
+                    llm.ask(prompt, SCHEMA, cache=False)
+        self.assertEqual([call.args[0] for call in cli_ask.call_args_list], ['codex', 'claude', 'claude'])
+
+    @patch('resume.llm._cli_ask', return_value={'ok': True})
+    @patch('resume.llm.cli_routes', return_value=[{'id': 'cli:codex', 'provider': 'codex', 'model': 'codex-default', 'cli': 'codex'}])
+    def test_cli_receives_system_boundary_and_strict_schema(self, cli_routes, cli_ask):
+        with llm.credential_scope([]):
+            llm.ask('untrusted job description', SCHEMA, system='Preserve all facts.', cache=False)
+        prompt, schema = cli_ask.call_args.args[1:]
+        self.assertIn('SYSTEM INSTRUCTIONS\nPreserve all facts.', prompt)
+        self.assertIn('UNTRUSTED INPUT DATA\nuntrusted job description', prompt)
+        self.assertFalse(schema['additionalProperties'])
+        self.assertEqual(schema['required'], ['ok'])
+
     def test_all_provider_requests_keep_key_out_of_url_and_body(self):
         for provider in ('openai', 'gemini', 'anthropic', 'openrouter'):
             with self.subTest(provider=provider):
