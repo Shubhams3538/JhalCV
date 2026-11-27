@@ -1,498 +1,164 @@
 # JhalCV
 
-A local resume workspace: paste a job description, import your GitHub projects,
-review concise descriptions, and save a one-page PDF. Everyone runs their own
-copy. There is no central server, account, frontend build, or Python
-package installation.
+A local resume workspace: paste a job description, and JhalCV tailors your
+saved profile to it and saves a one-page PDF. It also collects jobs from
+company career sites and checks each one against your experience. Everything
+runs on your own machine; there is no account or central server.
 
-## Start the browser app
+The backend exists in two languages, behind the same browser frontend:
 
-Install **Python 3.9+**, [Typst](https://github.com/typst/typst#installation), and
-[Poppler](https://poppler.freedesktop.org/) (`pdfinfo` and `pdftotext`). On macOS:
+- **Python**, the original (`resume/`, `app.py`)
+- **Go**, a full port (`jhalCV_go/`)
 
-```bash
-brew install typst poppler
-```
+Both read and write the same files, so you can switch between them on the
+same workspace. A benchmark suite compares the two.
 
-Then, from this repository:
+## Start
 
-```bash
-cp .env.example .env       # optional: existing environment-key workflow
-./start.sh
-# Windows, or any platform without sh:
-python3 app.py
-```
-
-The launcher chooses a free port, binds to `127.0.0.1`, and opens your browser.
-Keep the terminal running; press Ctrl+C to stop. To choose a port or open the
-URL yourself, use `python3 app.py --port 8765 --no-browser`.
-
-### First-time setup
-
-New workspaces open a five-step setup menu. Existing profiles and company lists
-are preserved; open **Settings → Run setup again** to review your current setup.
-
-1. Import a text-based **PDF or DOCX up to 1 MB**, or enter your profile manually.
-   Local extraction fills readable experience, education, project and skill
-   sections, plus contact details and GitHub/LinkedIn links (including hyperlink
-   targets hidden behind labels). Scanned PDFs need a text version or manual
-   entry. PDF extraction reads the first ten pages.
-2. Choose **Codex**, **Claude Code**, a supported API provider, automatic fallback,
-   or **rules only**. Installed CLIs are detected; a separate connection test
-   checks whether the selected provider can answer. That test consumes a small
-   amount of quota and sends no resume. API keys are saved immediately, locally.
-3. With an AI selected, **Fill profile from resume** automatically structures the
-   extracted text before opening the editable profile form. Rules mode uses local
-   suggestions. Confirm contact details, links, experience, education, skills,
-   projects and achievements; a checklist asks for missing details. GitHub and
-   LinkedIn fields are always visible and optional if unavailable. Missing
-   experience requires adding entries or explicitly confirming fresher status.
-   Experience years are suggested from employment dates and remain editable.
-   Resume text is sent to AI only by this explicit action. Every project needs
-   at least **three confirmed bullets**; missing claims must be supplied by you.
-4. Confirm professional experience (zero for freshers), target roles, excluded
-   titles, locations, output folder, filename, project count and companies.
-   New users receive the editable catalog in `data/companies.json` (147 companies).
-   Removing an existing company also removes its saved jobs on completion.
-5. Build and review the actual one-page PDF, confirm accuracy, then finish.
-   Setup checks PDF tools, folder write access, profile completeness and page fit.
-   Changing details requires a fresh preview. Saved profile text remains editable
-   afterwards; one-page checks still run on every resume export.
-
-The selected provider is shared by resume and job AI. Selecting a specific
-provider disables fallback to others; automatic mode permits fallback. Rules mode
-requires no subscription. **Gemini API** offers an account/model-dependent free
-tier; current terms are linked in setup. Gemini CLI and Antigravity are detected
-but their direct integrations are not enabled in this release. No subscription
-tokens are copied from those apps. Setup does not install software automatically.
-
-Unfinished form edits stay in the current tab until it is closed or refreshed.
-Only the final confirmation saves profile/preferences/companies; API-key additions
-are independent and persist even if setup is cancelled.
-
-### Try setup as a completely new user
-
-Run this from the project folder:
+Install [Typst](https://github.com/typst/typst#installation) and
+[Poppler](https://poppler.freedesktop.org/) (`pdfinfo`, `pdftotext`), plus
+Go 1.27+ for the Go backend or Python 3.9+ for the Python one. On macOS:
 
 ```bash
-python3 test_app.py
+brew install typst poppler go
 ```
 
-This opens a separate app instance labelled **FRESH TEST**, with blank onboarding,
-empty jobs/settings/credentials/usage, the starter company catalog, and a temporary
-PDF output folder. Your real workspace and running app are kept separate. Every
-run starts fresh; **Ctrl+C** stops the test app and deletes its temporary data.
-Avoid selecting a personal output folder if you want exported PDFs discarded too.
+Then, from this folder:
 
-Your installed AI tools are still detected. Explicitly selecting/testing a CLI
-uses its real login and quota. Personal API keys, `.env`, profile, caches and job
-databases are not copied or inherited; keys added during this test are disposable.
-
-For a terminal-only automatic startup/isolation check that cleans up immediately:
-
-```bash
-python3 test_app.py --check
-```
-
-Use `--no-browser` to open the printed URL yourself, or `--port 8770` to choose a
-test port. You can keep multiple fresh test instances open at different ports.
-
-In **Settings → Providers & API keys**, add OpenAI, Gemini, Anthropic, Z.AI (GLM), or
-OpenRouter keys. A provider-specific model menu selects a default automatically;
-you can choose another named model or **Other model…** for a custom ID. Saved
-entries offer **Change model** without requiring the key again. You can keep several
-keys and use **Try first** to set priority. Failed keys are skipped for the rest
-of the current operation; another configured key/provider is tried automatically.
-If none succeeds, JhalCV preserves original wording and uses rules.
-
-Saved credentials are never sent back to the browser, not even partial prefixes
-or suffixes. Every entry displays the same dummy mask. New keys are entered in
-a password field, sent to the local backend, and cleared from the form on
-submission. They are stored in a permission-restricted `.local/credentials.json`
-file (0600 on macOS/Linux), **not encrypted at rest**. Keys are excluded from
-provider error messages, request-body caches, and reports. User-entered keys
-necessarily pass through the browser when first submitted; saved keys are never
-retrieved by the frontend.
-
-When no key is configured, a startup dialog offers **Add an API key**, **Not
-now**, or **I will never add an API key**. The last option is saved locally and
-stops future reminders. You can re-enable reminders in Settings. Rules mode
-continues to work without credentials.
-
-1. Open **My profile**, replace the sample contact details, experience,
-   education, achievements, and skills, then save. An existing `profile.json`
-   is loaded automatically. Tailoring never edits these fixed sections.
-2. In **Tailor resume**, add a public GitHub repository URL. The app fetches its
-   default-branch README and prepares an editable project draft. Read the source,
-   confirm what you actually built, remove planned/unverified claims, and save.
-   You can also add projects manually or edit your existing library.
-3. Paste the job description and choose which projects to consider. The current
-   profile's project cap remains in effect (two by default). AI selects relevant
-   projects and lightly refines their bullets; rules work without an API key.
-4. Review the tailored bullet wording, then **Build PDF preview**. Check the
-   PDF and any text-check warnings, then **Save to destination**.
-5. Use **Choose folder…** in **Settings** to pick your saving folder, or enter
-   its path, then save settings. The default is `build/shubham_Resume.pdf`.
-   Each new export becomes the current file with that same name. The previous
-   PDF is preserved under `Archive/` with a unique dated filename. The saved
-   path is shown after export. Sort your file picker by **Date modified, newest
-   first** to put the most recently saved resume at the top; picker sorting
-   remains controlled by your operating system. Native selection uses macOS,
-   Windows, or Linux (Zenity/KDialog) dialogs, with manual path entry as fallback.
-
-### Import company career pages
-
-In **Jobs → Import companies CSV**, upload a UTF-8 CSV with two columns:
-
-```csv
-company,url
-Google,https://www.google.com/about/careers/applications/jobs/results/?location=India&sort_by=date
-```
-
-Review the preview and deselect any companies you do not want. Existing company
-names and equivalent URLs are skipped. Invalid rows stay out of the import.
-The limit is 500 companies and 500 KB per file. **India** is the default location
-filter for the imported companies; change it before confirming if needed.
-Importing only saves the sources. Select companies and use **Refresh selected**
-when ready to fetch jobs. Jobs and sources stay in the local `.local/jobs.db`.
-Portal filters are retained, while JhalCV also applies its location and posting-age
-rules. A valid careers link does not guarantee its site can currently be read.
-
-### Clarity and the page budget
-
-Project purpose comes first. The model is instructed to emphasize natural JD
-overlap using only confirmed project evidence, never to force requirements into
-the resume or invent achievements. Imported README drafts need your review:
-READMEs can contain plans, examples, or claims about other contributors.
-
-For existing bullets, every AI rewrite and every reviewed edit must fit the
-**original character count AND word count**, keep the same bullet count, and
-introduce no new numbers. Invalid AI edits fall back to the original bullet.
-Project headings and stacks are unchanged by rewriting. Projects display their
-heading and bullets, with no short introduction.
-
-The original selected content is first fitted using the existing one-page
-renderer. Reviewed wording is then compiled with exactly that baseline's font,
-spacing, and margins. If it overflows, original project wording is restored and
-the preview explains why. If the baseline itself cannot fit on one page, export
-is blocked so you can shorten the saved profile. Text-layer checks run before
-export; missing content blocks it, while heuristic glued-word/column warnings
-are shown for visual review. Shorter character counts alone cannot guarantee
-identical line wrapping, so the rendered PDF is the final check.
-
-### Local data and optional network services
-
-- `profile.json`: your source profile and confirmed project evidence.
-- `.local/settings.json`: your output folder, filename, mode, and environment model.
-- `.local/credentials.json`: private keys, provider/model choices, priority, and reminder preference.
-- `.cache/web/`: PDF previews, rendered JSON, and decision reports including JDs.
-- `.cache/llm/`: cached model requests and responses.
-
-All of these are gitignored. Output folders you choose outside this repository
-are your responsibility; avoid publicly tracked or shared folders for private
-resumes. Preview files remain on disk until you delete `.cache/web/`; draft
-sessions expire after two hours or when the local server stops. Save an exported
-PDF before closing the server.
-
-Public GitHub imports work without a token. For private repositories or higher
-API limits, set `GITHUB_TOKEN` in `.env` with read access to the repository. Use
-canonical repository URLs (`https://github.com/owner/repo`), not file/branch
-links. Moved repositories need their current URL. API keys/tokens stay in the
-local Python process and never reach the frontend.
-
-In AI mode, your JD and relevant profile/project content are sent directly to
-your configured providers; automatic failover can send the same content to
-another configured provider. README import contacts GitHub. **Rules only** in
-Settings makes no AI requests and uses README excerpts for import. Environment
-keys remain supported via `OPENAI_API_KEY`, `GEMINI_API_KEY`,
-`ANTHROPIC_API_KEY`, and `OPENROUTER_API_KEY`. **Ignore** hides an environment
-key from JhalCV without modifying the environment file.
-
-Provider adapters use native structured JSON requests: [OpenAI](https://developers.openai.com/api/docs/guides/structured-outputs),
-[Gemini](https://ai.google.dev/gemini-api/docs/generate-content/structured-output),
-[Anthropic](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
-and [OpenRouter](https://openrouter.ai/docs/guides/features/structured-outputs).
-Model IDs are editable because availability depends on your provider account.
-Requests are limited to fixed official endpoints; keys travel only in headers.
-Responses are validated locally before use or caching.
-
-### Verification
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-The suite covers storage validation, HTTP origin/token protection, GitHub URL
-and README handling, AI length/number fallback, fixed-section preservation,
-PDF overflow handling, real Typst/Poppler rendering, custom folders, stale
-previews, archive preservation, and concurrent export protection. PDF integration tests skip if tools are not
-installed. Provider tests use mocked native responses and failures to check
-automatic failover, response validation, cache isolation, and credential privacy.
-These fixtures do not prove model availability on a particular provider account.
-
-## Original terminal workflow
-
-`main.py` and `python3 -m resume` remain available:
-
-### Terminal setup
-
-```bash
-brew install typst poppler          # the only dependencies; no Python packages
-cp profile.example.json profile.json
-cp .env.example .env                # add OPENAI_API_KEY (optional)
-```
-
-### Terminal usage
-
-```bash
-python3 main.py
-```
-
-Copy a job posting first and it offers your clipboard. Otherwise paste it and
-press Enter.
-
-```bash
-python3 main.py jd.txt              # from a file
-cat jd.txt | python3 main.py        # piped
-python3 main.py --tailorer rules    # no API calls
-```
-
-The PDF lands in `build/` and opens automatically.
-
-```
-▸ tailoring stripe-platform.txt
-  llm gpt-5.5 (called)
-  reads as: Senior platform/backend infrastructure role focused on Go payment
-            services, Kubernetes operations, and platform observability.
-  angles: backend 40%, infra 35%, systems 25%
-  project: multithreaded-web-server (systems) — direct concurrency evidence
-  project: ai-interviewer (backend) — Postgres-backed API and validation
-  ✓ all checks passed
-▸ gaps: redis
-
-→ build/2026-08-27_stripe-platform.pdf
-```
-
-That last line is the sleeper feature: what the job wants that your profile
-can't back. It never touches the PDF — it tells you what to build next.
-
-## Other commands
-
-```bash
-python3 -m resume compare --jd jds/x.txt    # diff the two JD parsers
-python3 -m resume lock --tailorer llm       # prove frozen sections never move
-python3 -m resume check some_resume.pdf     # ATS checks on any PDF
-python3 -m resume make --jd jds/x.txt -v    # full flags
-```
-
-## How it works
-
-```
-profile.json ──┐
-               ├─► tailor ──► resume_data.json ──► classic.typ ──► PDF
-job posting ───┘   rules or LLM        │                            │
-                                       │            fit to one page (render.py)
-                                       │            ATS self-check  (verify.py)
-                                       ▼
-                              build/<date>_<label>.report.json
-                              every decision, plus the posting verbatim
-```
-
-**`profile.json`** — the superset of everything true about you. Every bullet that
-can appear on any generated resume is written here, by you, in advance. The
-tailorer only *selects and reorders*. That property is what makes it safe to
-automate.
-
-Bullets carry `angles` from a closed enum (`agentic backend systems infra
-frontend data eval dsa teaching`). Projects show their name, technology stack,
-GitHub link, and selected bullets. Legacy `taglines` in existing profiles are
-accepted but do not appear in the editor or PDF.
-
-Bullets also carry `status`: `shipped` (default) or `planned`. Planned bullets
-never render and no tailorer is shown them — write them ahead as a spec, flip
-them when the code lands. A project with fewer than two shipped bullets is
-dropped rather than rendered thin.
-
-**`templates/classic.typ`** — Typst reads the JSON natively. There is no string
-templating anywhere, so generated content can never cause an escaping bug or a
-broken compile.
-
-**`resume/verify.py`** — compiles, extracts with `pdftotext`, asserts the result.
-Every check exists because a real resume shipped with that defect:
-
-| Check | Catches |
+| Command | What it does |
 |---|---|
-| `bullet-intact` | text silently dropped or garbled by the renderer |
-| `skill-label` | `FundamentalsData Structures` — glued table columns |
-| `ligature` | `CODING PROfiLES` — ligature glyph with no Unicode mapping |
-| `glued-words` | any two words run together in the text layer |
-| `columns` | multi-column layout an ATS will interleave |
-| `page-count` | overflow past the budget |
+| `make go` | Start JhalCV with the Go backend |
+| `make python` | Start JhalCV with the Python backend |
+| `make test` | Check and test the Go code |
+| `make bench` | Run the Python vs Go benchmarks and print the report |
 
-It catches visual corruption an ATS would trip on. It cannot see crowding — two
-lines nearly touching still look fine to it.
+Add options with `ARGS`, for example `make go ARGS="--port 8765 --no-browser"`.
+The app binds to `127.0.0.1`, picks a free port and opens your browser; press
+Ctrl+C to stop. Run only one backend at a time on the same folder.
 
-## One-page fitting
+On first start, a setup guide imports your resume (PDF or DOCX), lets you
+choose an AI (Claude Code, Codex, an API key, or rules only), and builds a
+first preview. Claude Code is tried before Codex.
 
-`render.py` walks five typography presets, loosest first, recompiling each time.
-Only when the tightest still overflows does it drop bullets, lowest-scoring
-first, never below two per entry. Losing leading always beats losing an
-achievement. Typst compiles in ~40ms, so the whole loop is imperceptible.
+## Your data stays local
 
-## The lock
+Everything personal is gitignored: `profile.json`, `.local/` (settings, API
+keys, jobs and usage databases), `.cache/` (previews and AI answers),
+`build/`, real job descriptions in `jds/`, `.env` and `fonts/`. Check
+`git status --porcelain` before pushing.
 
-`profile.json` declares `_locked.frozen_sections`. Those render verbatim — no
-scoring, no selection, no reordering — whatever the job says. The fitter cannot
-trim them either.
+In AI mode, your job description and the relevant profile content go to the
+AI you chose. **Rules only** makes no AI requests.
 
-| Section | Behaviour |
+## How the Go port was done
+
+The Go version was ported module by module from the Python code. Each module
+was checked against the Python app before moving on:
+
+1. **Server and storage.** A local-only HTTP server serving the same `web/`
+   frontend with the same security checks (Host header, per-run token,
+   Origin), then the profile and settings with the same validation.
+2. **AI and credentials.** Structured AI calls across API keys and the Claude
+   Code and Codex CLIs, with failover, cooldowns, a local answer cache and
+   the same usage ledger (`usage.db`).
+3. **Resume pipeline.** Rules and AI tailoring, Typst page fitting, ATS text
+   checks, previews, and archived export.
+4. **Jobs collector and setup.** Readers for 13 career platforms, the SQLite
+   job store, parallel refresh with a bounded review queue, a headless
+   Chrome pool, and first-run setup with PDF/DOCX import.
+5. **Terminal CLI**, then the benchmark suite.
+
+How it was checked, each time by running both apps on a copy of the real
+workspace:
+
+- Rules tailoring: identical picks, scores and reports for every profile and
+  sample job.
+- `/api/state`, `/api/jobs`, `/api/usage`: identical responses.
+- Tailor → preview → PDF → export: identical output files.
+- All 13 career-platform readers: identical jobs and fields from the live sites.
+- A full refresh: every saved job row identical afterwards.
+- PDF and DOCX import, and the CLI output: identical.
+
+Go-specific choices:
+
+| Python | Go |
 |---|---|
-| `basics`, `experience`, `coding_profiles`, `education` | frozen |
-| `projects` | varies: which, what angle, which bullets |
-| `skills` | varies: ordering within each group |
+| Dicts everywhere | Typed structs for profile, settings, drafts and jobs; JSON maps only for open-ended AI answers and reports |
+| `ValueError` for user-facing errors | A small `usererr` type; other errors are logged and shown as a generic message |
+| Thread pools and `contextvars` | Goroutines, channels, and `context.Context` for budgets, sessions and timings |
+| `re` with lookbehind | Go's `regexp` has no lookbehind, so boundaries are checked in code |
+| Regex-based HTML-to-text | Hand-written single-pass scanners, tested against the original regexes on 20,000 random pages |
+| Standard library only | Standard library, plus a pure-Go SQLite driver and `x/term` |
 
-`_locked.max_projects_on_page` caps the project count and cannot be raised from
-the command line.
+The only behaviour change is that Claude Code is tried before Codex.
 
-```bash
-python3 -m resume lock --tailorer llm
-```
+Layout of the Go code:
 
-Regenerates against every JD in `jds/` and fails loudly if a frozen section
-differs between two of them. Run it after touching `tailor.py`.
-
-## Rules or LLM
-
-`auto` (the default) uses the LLM when a key is present and falls back to rules
-on any failure — no key, timeout, malformed response, failed validation —
-recording the reason in the sidecar. It never raises. `--tailorer llm` is the
-strict form: it exits non-zero rather than silently giving you a worse resume.
-
-### The split, decided by measurement
-
-The LLM did not beat plain string matching at recall. `gpt-4o-mini` missed
-`Kubernetes` and `Node.js` on a posting naming both outright, and scored a role
-demanding "close to the metal" work as 0% systems. So the rule-based pass stays
-and the model only adds to it:
-
-| | source |
+| Package | Replaces |
 |---|---|
-| `angle_scores` | LLM alone — the judgment call |
-| `matched_skills` | rules ∪ LLM — rules guarantee literals, LLM adds implied |
-| `gap_skills` | rules ∪ LLM — rules guarantee recall, LLM adds semantic |
+| `cmd/jhalcv` | `app.py` |
+| `cmd/resume` | `main.py`, `resume/cli.py`, `python -m resume.jobs` |
+| `internal/web`, `internal/app` | `resume/web.py` |
+| `internal/storage` | `resume/storage.py` |
+| `internal/credentials`, `internal/llm`, `internal/usage` | `credentials.py`, `llm.py`, `provider_api.py`, `usage.py` |
+| `internal/resume` | `tailor.py`, `llm_tailor.py`, `combined_tailor.py`, `descriptions.py`, `skill_swap.py`, `insights.py`, `render.py`, `verify.py`, `workspace.py`, `github.py`, `folders.py` |
+| `internal/jobs` | `resume/jobs/*` |
+| `internal/onboarding` | `onboarding.py`, `resume_import.py`, `document_text.py` |
 
-Only `gpt-5.5` mapped "networking" onto Computer Networks — the kind of
-semantic catch string matching can never make. Set in `llm_tailor.JD_MODEL`,
-overridable with `--model`.
+## Benchmarks: Python vs Go
 
-### Why the LLM cannot break the lock
+`make bench` runs everything, then prints and saves the report in
+`bench/results/<date>/REPORT.md`. Each backend runs on its own throwaway copy
+of the workspace in rules mode, so no AI calls are made and your real files
+are never touched. Details are in [`bench/README.md`](bench/README.md).
 
-`tailor_llm` runs the rule-based tailorer first to build the complete resume,
-then overwrites **only** `projects` and `skills`. Frozen sections come from
-identical code in both modes, so the LLM has no path to them.
+Results on an Apple M5 (10 cores), 27 Nov 2026:
 
-### What the LLM may return
+| What | Python | Go | Difference |
+|---|---|---|---|
+| Cold start (launch → first response) | 59 ms | 13 ms | Go 4.5× faster |
+| `GET /api/jobs`, all saved jobs, 8 clients | 9 req/s | 148 req/s | Go 16× faster |
+| `GET /api/state`, 8 clients | 122 req/s | 999 req/s | Go 8× faster |
+| `GET /api/jobs` p99 latency | 948 ms | 63 ms | Go 15× faster |
+| Tailoring through the API (rules) | 9.1 ms | 2.8 ms | Go 3.2× faster |
+| One-page PDF preview | 0.54 s | 0.53 s | Same (Typst does the work) |
+| Fresh jobs refresh, 15 companies | 50.1 s | 33.5 s | Go 1.5× faster |
+| Peak memory during that refresh | 507 MB | 102 MB | Go 5× less |
+| Server memory after the HTTP load test | 58 MB | 103 MB | Python 1.8× less |
 
-For the original CLI selection step: identifiers, never prose. The browser app adds a separate, bounded, reviewable project-bullet rewrite after selection. It answers "use `ws1, ws2, ws4`" and the renderer
-looks up your wording, so no generated text reaches the PDF. The schema enforces
-the rest — `matched_skills` is an enum of your real skills, so the API rejects
-an invented one server-side.
+CPU-only work on identical inputs:
 
-`validate_selection` repairs what a schema cannot express: bullets claimed by
-the wrong project, angles a project doesn't offer, duplicates, incomplete skill
-groups. Skills must return as a *permutation* — foreign entries dropped, omitted
-ones appended. Nothing invented, nothing lost. Every repair is printed, never
-applied silently.
+| What | Python | Go | Difference |
+|---|---|---|---|
+| Job description analysis | 2.13 ms | 0.08 ms | Go 27× faster |
+| Full rules tailoring | 2.26 ms | 0.11 ms | Go 21× faster |
+| Profile parsing and validation | 0.08 ms | 0.01 ms | Go 6× faster |
+| HTML → text, 1.4 MB page | 3.28 ms | 1.00 ms | Go 3.3× faster |
+| Reading year requirements (regex heavy) | 1.86 ms | 1.69 ms | About the same |
 
-## Spacing model
+Footprint:
 
-Adjacent Typst blocks collapse to `max(prev.below, next.above)`, which makes an
-exact vertical rhythm impossible with block spacing alone — the first build of
-this template read as cramped for exactly that reason. Every tight group now
-uses `stack`, which spaces children exactly. `leading` and `bullet_gap` are
-separate knobs, and `bullet_gap` must stay larger than `leading` so the eye can
-tell "next line of this bullet" from "next bullet".
+| | Python | Go |
+|---|---|---|
+| To run it | A Python interpreter | One 19 MB binary, nothing else |
+| Lines of code | 8,591 | 17,815 |
+| Lines of tests | 5,322 | 914 |
+| Third-party code | None | Pure-Go SQLite driver and its dependencies (10 modules) |
 
-## What is not in this repo
+What stands out:
 
-`.gitignore` keeps personal data out. Confirm with `git status --porcelain`
-before pushing.
+- **Go wins most on pure computation** (20–27×) and under concurrent load,
+  where Python's threads share one interpreter lock.
+- **Work that waits on outside tools or the network gains less.** PDF
+  previews are Typst's time; a refresh is mostly waiting for career sites.
+  The refresh still finished 1.5× sooner using a fifth of the memory.
+- **Regex-heavy code is close.** Python's `re` is written in C, and Go's
+  `regexp` trades speed for guaranteed linear time. Replacing the hottest
+  patterns with scanners was needed to make Go faster at HTML-to-text.
+- **Go holds on to memory after a burst**: its garbage collector keeps
+  freed heap for reuse instead of returning it straight away.
+- **Go takes about twice the code**, mostly explicit error handling and types,
+  and ships as a single self-contained binary.
 
-| Excluded | Why |
-|---|---|
-| `profile.json` | your name, phone, email, employment history |
-| `build/` | every PDF carries your phone and email; reports embed the posting |
-| `jds/*.txt` (bar the samples) | **reveals where you are applying** — and your employer can read a public repo |
-| `.env`, `*.key`, `*.pem` | your API key |
-| `.cache/` | cached model responses |
-| `fonts/*` | licensed binaries |
-
-The third row is the one that bites people.
-
-## Layout
-
-```
-main.py                 interactive entry point
-profile.json            your data (gitignored)
-profile.example.json    same schema, fake data
-templates/classic.typ   the resume template
-resume/
-  cli.py                make · compare · lock · check
-  tailor.py             rule-based tailoring, the lock, status filtering
-  llm_tailor.py         JD comprehension + selection, and their validation
-  llm.py                the only module that touches the network
-  render.py             Typst invocation and the fitting loop
-  verify.py             ATS checks
-```
-
-## Notes on the data
-
-`needs_verification` fields flag numbers to confirm before sending. They never
-render. Three are outstanding, all on the web server project.
-
-## AI usage and dollar estimates
-
-Open **Usage** in the sidebar to see lifetime/today token counts, cached input, local cache hits, and a provider/model breakdown. Counts persist locally in `.local/usage.db` across app restarts. Tracking begins with this feature; older calls cannot be reconstructed. Only metadata and token/cost counters are saved, never prompts, answers or credentials.
-
-API-key costs use standard text pricing estimates; OpenRouter's reported request charge takes precedence when provided. Codex and Claude Code job calls appear separately as **subscription equivalent**, not an additional subscription bill. Claude's CLI cost is itself an estimate. Credits, free tiers, taxes and subscription fees are excluded. Unknown usage and unpriced models are explicitly marked as partial totals. Local response-cache hits add no new tokens or cost. Failed/malformed answers still count whenever the provider reports usage.
-
-The price snapshot was checked October 25, 2026 against the official [OpenAI](https://developers.openai.com/api/docs/pricing), [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing), [Gemini](https://ai.google.dev/gemini-api/docs/pricing), and [OpenRouter](https://openrouter.ai/docs/cookbook/administration/usage-accounting) pages. Rates are not refreshed automatically. Codex JSON usage does not report its model; its configurable valuation reference defaults to `gpt-6.1-sol`, verified as this installation's CLI default. Changing that reference affects future valuations only, not the model being run or past records. Unsupported long-context prices remain unpriced. Cache creation uses the default lifetime unless Anthropic reports one-hour creation explicitly. Gemini 3.8 Flash's announced January 2027 rate change is included.
-
-## Faster job refreshes
-
-Company collection uses eight workers and a shared pool of twelve detail readers. Browser renders are limited to four and subscription AI calls to three. Direct feeds run before generic pages. Each company has a 150-second active-work budget; waiting for a browser/AI slot is excluded, and network/AI calls also have shorter timeouts. This is a bounded-work policy rather than a guaranteed wall-clock completion time.
-
-The Jobs page shows completed and active companies alongside jobs reviewed, in review, and queued. Company collection and AI review have independent worker queues: as each company finishes saving descriptions, it joins a round-robin schedule feeding a bounded shared queue. Large companies cannot admit their entire backlog ahead of other ready companies. Three review workers combine ready jobs across companies into batches of up to eight, without waiting for a batch to fill, and save each finished batch immediately. Collection and review share the existing three-call AI limit; cache hits avoid repeated model calls. The refresh finishes after both collection and queued reviews finish. Each job is scheduled at most once per run, including uncertain/rules-fallback results. Large detail-only listings can use a batched title screen to avoid fetching obviously unrelated roles; full feeds and small lists avoid that extra call.
-
-Exact unchanged AI prompts reuse local validated answers for up to fourteen days in `.cache/jobs-ai`. Changed job text, titles or candidate experience produce different cache keys. Structured and server-rendered pages skip Chrome where possible; known challenge pages skip pointless AI extraction.
-
-SmartRecruiters, Oracle Recruiting and Jibe/iCIMS have direct feed readers. Generic career pages are periodically checked for linked feeds without speculative board searches or rendering during discovery. Automatic upgrades retain original links, jobs and statuses and skip URL filters they cannot preserve. Job URL reconciliation and URL/ID deletion tombstones prevent duplicate Applied jobs and deleted jobs resurfacing when readers change. To repair a portal manually, expand **Edit career link** on its source card; saving retains the collection.
-
-Run `python3 scripts/benchmark_job_refresh.py` for a repeatable offline concurrency comparison. A local run over 147 simulated feeds measured 3.946 seconds serial versus 0.584 seconds with eight workers (6.75x); this excludes real network/browser/model latency and does not promise that improvement for every site. CAPTCHA/access-blocked sites still require a usable official board link.
-
-Use **Review unreviewed jobs (N)** to process all saved jobs still missing a relevance/eligibility decision. This action reads the local database and calls the subscription AI; it does not fetch career portals or posting details. It snapshots the full queue once, skips completed reviews, and uses the same three workers to save each finished batch immediately. Uncertain results can remain in Needs review. The button is disabled during collection/review and when the queue is empty. Changing experience via Save & recheck also uses this saved-only path. Review-only activity records last_review separately and does not change the last portal-refresh time.
-
-## Live timing reports and returning to a job
-
-Open **Benchmarks** after starting a Refresh all, selected-company refresh, or saved-job review. Each run automatically records elapsed wall-clock time, accumulated HTTP/browser/AI/database timings, browser/AI/worker queue waits, cache hits, failures, and per-company collection timings. Live reports update every two seconds while the view is open; completed reports persist as metadata-only JSON under `.local/job-benchmarks/`. Select a recent run or download JSON to compare or share measurements. Earlier runs cannot be reconstructed. No prompts, descriptions, profile content, URLs or credentials are included in reports.
-
-Stage times are inclusive and overlap across threads: company/listing/detail/eligibility spans can contain HTTP, browser or AI spans. Never add stage totals together or interpret them as shares of elapsed time. Company AI columns cover collection; shared eligibility batch timings appear in overall stages. Active spans appear when they complete. Database timing includes connection/migration/transaction/lock waiting. Timing-file failures warn in Benchmarks and never cause successful inference to be retried. Reports generated by the terminal job refresh are also readable by the app.
-
-**Tailor resume** keeps the job title and posting link visible above the workspace. **Back to this job** restores the category, search and Jobs position, opens the original drawer, and highlights/focuses the job. If its category changed, its current category is selected; if it was deleted, the app explains that it is no longer saved. A small sessionStorage record preserves job/navigation metadata across reloads in that tab; it does not store the job description or resume/profile content. Navigating elsewhere cancels a pending return action.
-
-
-Jobs have **More → Mark not eligible** for correcting an AI decision. The manual decision persists across refreshes and rechecks, skips further automatic review, and can be reversed with **Undo not eligible**. Applied and posting-age rules still take precedence. Secondary actions live in More; explanations are collapsed under AI assessment.
-
-Nutanix careers links use the employer’s public Jobvite board and XML feed because the careers frontend can challenge automated requests. Public category/search pagination is followed before intersecting feed jobs with public listings. Country, team, location and keyword filters are retained; unsupported filters fail explicitly. Posting dates come from the employer feed (which can differ from the careers frontend’s displayed calendar date). No AI is needed for Nutanix collection.
-
-
-### Z.AI GLM Coding Plan
-
-Settings → Providers & API keys offers **Z.AI Coding Plan (GLM)** with GLM-5.3 Flash and GLM-5.3. Create a key at
-https://z.ai/manage-apikey/apikey-list and paste it there. Requests go to the same Anthropic-compatible Coding Plan
-endpoint ZCode uses (`https://api.z.ai/api/anthropic`), so they draw on the plan's quota. The key is stored locally like
-the other providers' keys.
-
-Job checks try GLM-5.3 Flash, then GLM-5.3, then Codex, then Claude Code. Every new job is checked in the refresh that
-finds it (no per-run cap). Jobs whose site publishes no posting date appear under Eligible, labelled "Posting date
-unverified", once both checks pass.
+Every speed figure depends on the machine and, for the refresh, on how the
+career sites respond that day.
